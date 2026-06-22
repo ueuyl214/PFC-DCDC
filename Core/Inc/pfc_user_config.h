@@ -29,7 +29,7 @@
  * 3. Measured sensor zero voltage at STM32 ADC pins
  * ========================================================= */
 #define PFC_VAC_ZERO_V                  1.647f
-#define PFC_IL_ZERO_V                   1.648f
+#define PFC_IL_ZERO_V                   1.650f
 #define PFC_VBUS_ZERO_V                 1.649f
 
 /* =========================================================
@@ -38,8 +38,16 @@
 #define PFC_VAC_GAIN                    76.25f
 #define PFC_VBUS_GAIN                   76.25f
 
-#define PFC_IL_GAIN_V_PER_A             0.1952f
+#define PFC_IL_GAIN_V_PER_A             0.3280f
 #define PFC_IL_SIGN                     1.0f
+
+/* Runtime inductor-current zero calibration, RAM only. */
+#define PFC_IL_ZERO_AUTO_CAL_ENABLE     1
+#define PFC_IL_ZERO_CAL_SAMPLES         256U
+#define PFC_IL_ZERO_CAL_MIN_V           1.45f
+#define PFC_IL_ZERO_CAL_MAX_V           1.85f
+#define PFC_IL_ZERO_CAL_MAX_SPAN_V      0.030f
+#define PFC_IL_ZERO_CAL_SETTLE_MS       100U
 
 /* =========================================================
  * 5. Protection thresholds
@@ -151,6 +159,19 @@
 #define PFC_CURRENT_LOOP_ISR_DECIMATION    5U
 #define PFC_CURRENT_LOOP_HZ                10000.0f
 #define PFC_CURRENT_LOOP_PERIOD_US         100U
+
+/* 18Vac open-loop 2% duty bring-up test. This state intentionally bypasses
+ * PFC voltage/current loops and only keeps basic PWM/VBUS/sync-current guards.
+ */
+#define PFC_OPENLOOP_2PCT_TEST_ENABLE          1
+#define PFC_OPENLOOP_2PCT_DUTY                 0.120f
+#define PFC_OPENLOOP_2PCT_DUTY_MAX             0.120f
+#define PFC_OPENLOOP_2PCT_VBUS_LIMIT_V         35.0f
+
+#define PFC_OPENLOOP_2PCT_OCP_ENABLE           1
+#define PFC_OPENLOOP_2PCT_OCP_A                2.50f
+#define PFC_OPENLOOP_2PCT_OCP_TRIP_COUNT       5U
+#define PFC_OPENLOOP_2PCT_OCP_RELEASE_A        2.00f
 
 /* Keep the verified DC_I behavior as the default. Set this to 1 only after
  * the conservative average-current loop is stable with the current hardware.

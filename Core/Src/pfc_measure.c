@@ -17,6 +17,9 @@ float vbus_adc_v = 0.0f;
 float adc_vref_manual_v = PFC_ADC_VREF_MANUAL_V;
 float adc_vref_est_v = 0.0f;
 float adc_vref_used_v = PFC_ADC_VREF_MANUAL_V;
+float il_zero_runtime_v = PFC_IL_ZERO_V;
+uint8_t il_zero_calibrated = 0U;
+float il_zero_cal_span_v = 0.0f;
 
 float vac_inst_v = 0.0f;
 float vac_abs_v = 0.0f;
@@ -122,7 +125,7 @@ static void PFC_UpdateSyncCurrentFromRaw(uint16_t raw)
   il_sync_adc_v = adc_v;
   if (PFC_IL_GAIN_V_PER_A > 0.000001f)
   {
-    il_sync_a = ((adc_v - PFC_IL_ZERO_V) / PFC_IL_GAIN_V_PER_A) * PFC_IL_SIGN;
+    il_sync_a = ((adc_v - il_zero_runtime_v) / PFC_IL_GAIN_V_PER_A) * PFC_IL_SIGN;
   }
   else
   {
@@ -289,6 +292,81 @@ void PFC_Measure_Start(void)
   }
 }
 
+float PFC_Measure_GetCurrentZeroVoltage(void)
+{
+  return il_zero_runtime_v;
+}
+
+/*
+ * This function must only be called while PWM is stopped and the power stage
+ * has no inductor current. If power input is present and current can flow, the
+ * calibration result will be wrong. Do not auto-recalibrate during runtime.
+ */
+void PFC_Measure_CalibrateCurrentZero(void)
+{
+#if (PFC_IL_ZERO_AUTO_CAL_ENABLE != 0)
+  const uint32_t sample_count = PFC_IL_ZERO_CAL_SAMPLES;
+  float sum_v = 0.0f;
+  float min_v = 1000.0f;
+  float max_v = -1000.0f;
+  float avg_v;
+  uint32_t i;
+
+  il_zero_runtime_v = PFC_IL_ZERO_V;
+  il_zero_calibrated = 0U;
+  il_zero_cal_span_v = 0.0f;
+
+  if (sample_count == 0U)
+  {
+    return;
+  }
+
+  HAL_Delay(PFC_IL_ZERO_CAL_SETTLE_MS);
+
+  for (i = 0U; i < sample_count; i++)
+  {
+    const uint16_t raw = adc_dma_buf[PFC_ADC_BUF_IL];
+    float sample_v;
+
+    raw_vrefint = adc_dma_buf[PFC_ADC_BUF_VREFINT];
+    PFC_UpdateAdcVref();
+    sample_v = PFC_RawToAdcVoltage(raw);
+
+    sum_v += sample_v;
+    if (sample_v < min_v)
+    {
+      min_v = sample_v;
+    }
+    if (sample_v > max_v)
+    {
+      max_v = sample_v;
+    }
+
+    HAL_Delay(1U);
+  }
+
+  avg_v = sum_v / (float)sample_count;
+  il_zero_cal_span_v = max_v - min_v;
+
+  if ((avg_v >= PFC_IL_ZERO_CAL_MIN_V) &&
+      (avg_v <= PFC_IL_ZERO_CAL_MAX_V) &&
+      (il_zero_cal_span_v <= PFC_IL_ZERO_CAL_MAX_SPAN_V))
+  {
+    il_zero_runtime_v = avg_v;
+    il_zero_calibrated = 1U;
+  }
+  else
+  {
+    il_zero_runtime_v = PFC_IL_ZERO_V;
+    il_zero_calibrated = 0U;
+  }
+#else
+  il_zero_runtime_v = PFC_IL_ZERO_V;
+  il_zero_calibrated = 0U;
+  il_zero_cal_span_v = 0.0f;
+#endif
+}
+
 void PFC_Measure_Update(void)
 {
   const uint16_t dma_vac = adc_dma_buf[PFC_ADC_BUF_VAC];
@@ -330,7 +408,7 @@ void PFC_Measure_Update(void)
 
   if (PFC_IL_GAIN_V_PER_A > 0.000001f)
   {
-    il_a = ((il_adc_v - PFC_IL_ZERO_V) / PFC_IL_GAIN_V_PER_A) * PFC_IL_SIGN;
+    il_a = ((il_adc_v - il_zero_runtime_v) / PFC_IL_GAIN_V_PER_A) * PFC_IL_SIGN;
   }
   else
   {

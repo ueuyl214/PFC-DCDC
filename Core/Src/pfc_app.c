@@ -108,6 +108,12 @@ static volatile float fault_peak_isr_il_sync_a = 0.0f;
 static volatile float fault_peak_isr_il_dma_a = 0.0f;
 static volatile float fault_peak_isr_duty = 0.0f;
 static volatile uint8_t fault_peak_isr_cnt = 0U;
+static volatile float openloop_pk_is = 0.0f;
+static volatile float openloop_pk_il = 0.0f;
+static volatile float openloop_last_is = 0.0f;
+static volatile float openloop_last_il = 0.0f;
+static volatile uint32_t openloop_isr_count = 0U;
+static volatile uint8_t openloop_ocp_cnt = 0U;
 
 static void PFC_EnterFault(PFC_Fault_t fault);
 static void PFC_CurrentLoop_Task(float i_ref, uint8_t freeze_integrator);
@@ -215,6 +221,8 @@ static const char *PFC_StateName(PFC_State_t state)
       return "AC_CL";
     case PFC_STATE_DC_CURRENT_TEST:
       return "DC_I";
+    case PFC_STATE_OPENLOOP_2PCT_TEST:
+      return "OPEN_2PCT";
     case PFC_STATE_AC_CURRENT_SHAPE_TEST:
       return "AC_I";
     case PFC_STATE_PFC_RUN:
@@ -248,6 +256,7 @@ static void PFC_CurrentProtectionCountersReset(void)
   /* Fast test OCP now uses the PWM-synchronized injected current path. */
   pfc_test_ilimit_cnt = 0U;
   pfc_isr_ilimit_cnt = 0U;
+  openloop_ocp_cnt = 0U;
 }
 
 static float PFC_AcRectTargetVref(void)
@@ -335,6 +344,37 @@ static void PFC_IsrControlReset(void)
   fault_peak_isr_il_dma_a = 0.0f;
   fault_peak_isr_duty = 0.0f;
   fault_peak_isr_cnt = 0U;
+}
+
+static float PFC_OpenLoop2PctDuty(void)
+{
+  return PFC_ClampFloat(PFC_OPENLOOP_2PCT_DUTY,
+                        0.0f,
+                        PFC_OPENLOOP_2PCT_DUTY_MAX);
+}
+
+static void PFC_OpenLoop2PctDiagnosticsReset(void)
+{
+  openloop_pk_is = 0.0f;
+  openloop_pk_il = 0.0f;
+  openloop_last_is = 0.0f;
+  openloop_last_il = 0.0f;
+  openloop_isr_count = 0U;
+  openloop_ocp_cnt = 0U;
+}
+
+static void PFC_OpenLoop2PctApplyDebug(float duty)
+{
+  pfc_duty_cmd = duty;
+  pfc_duty_raw_dbg = duty;
+  pfc_duty_slew_dbg = 0.0f;
+  pfc_duty_out_dbg = duty;
+  pfc_duty_ff = 0.0f;
+  pfc_duty_pi = 0.0f;
+  pfc_iref_a = 0.0f;
+  pfc_iref_dbg = 0.0f;
+  pfc_i_err_a = 0.0f;
+  pfc_iamp_cmd = 0.0f;
 }
 
 static void PFC_PfcControl_Reset(void)
@@ -1906,6 +1946,42 @@ void PFC_App_OnInjectedCurrentIsr(void)
   uint8_t is_ac_i = 0U;
   uint8_t is_pfc_shape = 0U;
 
+  if (pfc_state == PFC_STATE_OPENLOOP_2PCT_TEST)
+  {
+    openloop_last_is = il_sync_a;
+    openloop_last_il = il_a;
+    if (il_sync_a > openloop_pk_is)
+    {
+      openloop_pk_is = il_sync_a;
+    }
+    if (il_a > openloop_pk_il)
+    {
+      openloop_pk_il = il_a;
+    }
+    openloop_isr_count++;
+
+#if (PFC_OPENLOOP_2PCT_OCP_ENABLE != 0)
+    if (il_sync_a > PFC_OPENLOOP_2PCT_OCP_A)
+    {
+      if (openloop_ocp_cnt < PFC_OPENLOOP_2PCT_OCP_TRIP_COUNT)
+      {
+        openloop_ocp_cnt++;
+      }
+    }
+    else if (il_sync_a < PFC_OPENLOOP_2PCT_OCP_RELEASE_A)
+    {
+      openloop_ocp_cnt = 0U;
+    }
+
+    if (openloop_ocp_cnt >= PFC_OPENLOOP_2PCT_OCP_TRIP_COUNT)
+    {
+      PFC_PWM_SetDuty(0.0f);
+      pfc_isr_fault_request = (uint8_t)PFC_FAULT_OCP;
+    }
+#endif
+    return;
+  }
+
   pfc_isr_inj_div_cnt++;
   if (pfc_isr_inj_div_cnt < PFC_CURRENT_LOOP_ISR_DECIMATION)
   {
@@ -2068,6 +2144,55 @@ static uint8_t PFC_HandleIsrFaultRequest(void)
   }
 
   return 0U;
+}
+
+static void PFC_OpenLoop2PctTask(void)
+{
+#if (PFC_OPENLOOP_2PCT_TEST_ENABLE != 0)
+  const float fixed_duty = PFC_OpenLoop2PctDuty();
+
+  if (pfc_state != PFC_STATE_OPENLOOP_2PCT_TEST)
+  {
+    return;
+  }
+
+  PFC_OpenLoop2PctApplyDebug(fixed_duty);
+
+  if (vbus_v > PFC_OPENLOOP_2PCT_VBUS_LIMIT_V)
+  {
+    PFC_PWM_SetErrorCode(PFC_APP_ERR_PFC_TEST_VBUS);
+    PFC_EnterFault(PFC_FAULT_TEST_OVP);
+    return;
+  }
+
+  if (PFC_PWM_GetErrorCode() != 0U)
+  {
+    PFC_EnterFault(PFC_FAULT_PWM);
+    return;
+  }
+
+  if (pfc_pwm_active == 0U)
+  {
+    PFC_PWM_StartAcRectClosedLoopAtDuty(fixed_duty);
+    if (PFC_PWM_GetErrorCode() != 0U)
+    {
+      PFC_EnterFault(PFC_FAULT_PWM);
+      return;
+    }
+    pfc_pwm_active = 1U;
+  }
+  else
+  {
+    PFC_PWM_SetDuty(fixed_duty);
+    if (PFC_PWM_GetErrorCode() != 0U)
+    {
+      PFC_EnterFault(PFC_FAULT_PWM);
+      return;
+    }
+  }
+#else
+  (void)PFC_OpenLoop2PctDuty;
+#endif
 }
 
 static void PFC_PfcTask(void)
@@ -2353,6 +2478,32 @@ static void PFC_EnterState(PFC_State_t next_state)
 #endif
       break;
 
+    case PFC_STATE_OPENLOOP_2PCT_TEST:
+#if (PFC_OPENLOOP_2PCT_TEST_ENABLE != 0)
+    {
+      const float fixed_duty = PFC_OpenLoop2PctDuty();
+
+      PFC_PWM_AllOff();
+      PFC_PfcControl_Reset();
+      PFC_CurrentProtectionCountersReset();
+      PFC_OpenLoop2PctDiagnosticsReset();
+      PFC_PWM_StartAcRectClosedLoopAtDuty(fixed_duty);
+      if (PFC_PWM_GetErrorCode() != 0U)
+      {
+        PFC_EnterFault(PFC_FAULT_PWM);
+      }
+      else
+      {
+        pfc_pwm_active = 1U;
+        pfc_state = PFC_STATE_OPENLOOP_2PCT_TEST;
+        PFC_OpenLoop2PctApplyDebug(fixed_duty);
+      }
+    }
+#else
+      PFC_EnterState(PFC_STATE_AC_CURRENT_SHAPE_TEST);
+#endif
+      break;
+
     case PFC_STATE_DC_CURRENT_TEST:
     case PFC_STATE_PFC_RUN:
 #if (PFC_PFC_ENABLE != 0)
@@ -2483,6 +2634,9 @@ static void PFC_HandleButton(void)
       break;
     case PFC_STATE_ADC_TEST:
 #if (PFC_PFC_ENABLE != 0)
+#if (PFC_OPENLOOP_2PCT_TEST_ENABLE != 0)
+      PFC_EnterState(PFC_STATE_OPENLOOP_2PCT_TEST);
+#else
 #if (PFC_18VAC_FAST_ILOOP_TEST_ENABLE != 0)
       PFC_EnterState(PFC_STATE_AC_CURRENT_SHAPE_TEST);
 #elif ((PFC_TEST_PROFILE_18VAC_SIMPLE_PFC != 0) || (PFC_TEST_PROFILE_18VAC_PFC_RUN_32V != 0))
@@ -2492,6 +2646,7 @@ static void PFC_HandleButton(void)
 #else
       PFC_EnterState(PFC_STATE_DC_CURRENT_TEST);
 #endif
+#endif
 #else
 #if (PFC_AC_TEST_DIRECT_MODE != 0)
       PFC_EnterState(PFC_STATE_AC_RECT_VOLTAGE_LOOP);
@@ -2499,6 +2654,9 @@ static void PFC_HandleButton(void)
       PFC_EnterState(PFC_STATE_PWM_ASYNC_TEST);
 #endif
 #endif
+      break;
+    case PFC_STATE_OPENLOOP_2PCT_TEST:
+      PFC_EnterState(PFC_STATE_AC_CURRENT_SHAPE_TEST);
       break;
     case PFC_STATE_DC_CURRENT_TEST:
       PFC_EnterState(PFC_STATE_AC_CURRENT_SHAPE_TEST);
@@ -2552,6 +2710,39 @@ static void PFC_CheckProtection(void)
 
   if (PFC_HandleIsrFaultRequest() != 0U)
   {
+    return;
+  }
+
+  if (pfc_state == PFC_STATE_OPENLOOP_2PCT_TEST)
+  {
+    if (PFC_PWM_GetErrorCode() != 0U)
+    {
+      PFC_EnterFault(PFC_FAULT_PWM);
+      return;
+    }
+
+    if (vbus_v > PFC_OPENLOOP_2PCT_VBUS_LIMIT_V)
+    {
+      PFC_PWM_SetErrorCode(PFC_APP_ERR_PFC_TEST_VBUS);
+      PFC_EnterFault(PFC_FAULT_TEST_OVP);
+      return;
+    }
+
+    if (vbus_v >= PFC_VBUS_OVP_HARD_V)
+    {
+      PFC_EnterFault(PFC_FAULT_OVP);
+      return;
+    }
+
+    if (vbus_v >= PFC_VBUS_OVP_SOFT_V)
+    {
+      PFC_EnterFault(PFC_FAULT_OVP);
+      return;
+    }
+
+    pfc_test_ilimit_cnt = 0U;
+    il_ocp_cnt = 0U;
+    il_rev_cnt = 0U;
     return;
   }
 
@@ -2696,12 +2887,12 @@ static void PFC_UpdateDisplayPage2(char *line, size_t line_size, char *value, si
   (void)snprintf(line, line_size, "RAW REF  %4u", raw_vrefint);
   PFC_OLED_WriteLine(0U, line);
 
-  PFC_FormatFixed(value, value_size, adc_vref_manual_v, 3U);
-  (void)snprintf(line, line_size, "VREFM %s", value);
+  PFC_FormatFixed(value, value_size, il_zero_runtime_v, 3U);
+  (void)snprintf(line, line_size, "Z:%s C:%u", value, (unsigned)il_zero_calibrated);
   PFC_OLED_WriteLine(1U, line);
 
-  PFC_FormatFixed(value, value_size, adc_vref_est_v, 3U);
-  (void)snprintf(line, line_size, "VREFE %s", value);
+  PFC_FormatFixed(value, value_size, il_zero_cal_span_v, 3U);
+  (void)snprintf(line, line_size, "S:%s", value);
   PFC_OLED_WriteLine(2U, line);
 
   PFC_FormatFixed(value, value_size, adc_vref_used_v, 3U);
@@ -2730,6 +2921,53 @@ static void PFC_UpdateDisplayPage2(char *line, size_t line_size, char *value, si
                  (unsigned long)duty_internal_pct,
                  (unsigned long)duty_output_pct,
                  (unsigned)ac_rect_vin_enabled);
+  PFC_OLED_WriteLine(7U, line);
+}
+
+static void PFC_UpdateDisplayPageOpenLoop2Pct(char *line, size_t line_size, char *value, size_t value_size)
+{
+  char value2[12];
+  const uint32_t duty_pct = (uint32_t)((PFC_OpenLoop2PctDuty() * 100.0f) + 0.5f);
+  const uint32_t isr_count = openloop_isr_count & 0x0FFFUL;
+
+  (void)snprintf(line, line_size, "OPEN D:%02lu", (unsigned long)duty_pct);
+  PFC_OLED_WriteLine(0U, line);
+
+  PFC_FormatFixed(value, value_size, il_a, 2U);
+  PFC_FormatFixed(value2, sizeof(value2), il_sync_a, 2U);
+  (void)snprintf(line, line_size, "IL:%s IS:%s", value, value2);
+  PFC_OLED_WriteLine(1U, line);
+
+  PFC_FormatFixed(value, value_size, openloop_pk_il, 2U);
+  PFC_FormatFixed(value2, sizeof(value2), openloop_pk_is, 2U);
+  (void)snprintf(line, line_size, "PKI:%s PKS:%s", value, value2);
+  PFC_OLED_WriteLine(2U, line);
+
+  PFC_FormatFixed(value, value_size, vbus_v, 1U);
+  PFC_FormatFixed(value2, sizeof(value2), vac_abs_v, 1U);
+  (void)snprintf(line, line_size, "VB:%s VA:%s", value, value2);
+  PFC_OLED_WriteLine(3U, line);
+
+  (void)snprintf(line,
+                 line_size,
+                 "RAW:%04u RS:%04u",
+                 (unsigned)raw_il,
+                 (unsigned)raw_il_sync);
+  PFC_OLED_WriteLine(4U, line);
+
+  PFC_FormatFixed(value, value_size, il_zero_runtime_v, 3U);
+  (void)snprintf(line, line_size, "Z:%s C:%u", value, (unsigned)il_zero_calibrated);
+  PFC_OLED_WriteLine(5U, line);
+
+  PFC_FormatFixed(value, value_size, il_zero_cal_span_v, 3U);
+  (void)snprintf(line, line_size, "S:%s", value);
+  PFC_OLED_WriteLine(6U, line);
+
+  (void)snprintf(line,
+                 line_size,
+                 "C:%04lu F:%u",
+                 (unsigned long)isr_count,
+                 (unsigned)pfc_fault);
   PFC_OLED_WriteLine(7U, line);
 }
 
@@ -3134,7 +3372,11 @@ static void PFC_UpdateDisplay(void)
   }
   else if (page == 0U)
   {
-    if (PFC_IsPfcTestState() != 0U)
+    if (pfc_state == PFC_STATE_OPENLOOP_2PCT_TEST)
+    {
+      PFC_UpdateDisplayPageOpenLoop2Pct(line, sizeof(line), value, sizeof(value));
+    }
+    else if (PFC_IsPfcTestState() != 0U)
     {
       if (pfc_state == PFC_STATE_PFC_RUN)
       {
@@ -3172,6 +3414,7 @@ void PFC_App_Task(void)
   PFC_CheckProtection();
   PFC_BoostVoltageLoopTask();
   PFC_AcRectVoltageLoopTask();
+  PFC_OpenLoop2PctTask();
   PFC_PfcTask();
   PFC_CheckProtection();
   PFC_UpdateDisplay();

@@ -28,6 +28,9 @@ extern float vbus_adc_v;
 extern float adc_vref_manual_v;
 extern float adc_vref_est_v;
 extern float adc_vref_used_v;
+extern float il_zero_runtime_v;
+extern uint8_t il_zero_calibrated;
+extern float il_zero_cal_span_v;
 
 extern float vac_inst_v;
 extern float vac_abs_v;
@@ -50,6 +53,8 @@ extern volatile uint32_t pfc_adc_sync_pulse_cnt;
 extern volatile uint32_t pfc_adc_inj_eoc_cnt;
 
 void PFC_Measure_Start(void);
+void PFC_Measure_CalibrateCurrentZero(void);
+float PFC_Measure_GetCurrentZeroVoltage(void);
 void PFC_Measure_Update(void);
 
 #ifdef __cplusplus

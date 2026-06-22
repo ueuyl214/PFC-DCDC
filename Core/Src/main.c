@@ -99,6 +99,7 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   PFC_Measure_Start();
+  PFC_Measure_CalibrateCurrentZero();
   PFC_PWM_InitSafe();
 
   /* USER CODE END 2 */
