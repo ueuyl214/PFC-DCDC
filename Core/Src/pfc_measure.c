@@ -2,6 +2,7 @@
 
 #include "adc.h"
 #include "hrtim.h"
+#include "pfc_app.h"
 
 volatile uint16_t adc_dma_buf[PFC_ADC_CH_COUNT] = {0U, 0U, 0U, 0U};
 
@@ -353,5 +354,8 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
     const uint32_t raw = HAL_ADCEx_InjectedGetValue(hadc, ADC_INJECTED_RANK_1);
 
     PFC_UpdateSyncCurrentFromRaw((uint16_t)raw);
+#if (PFC_CURRENT_LOOP_IN_ISR_ENABLE != 0)
+    PFC_App_OnInjectedCurrentIsr();
+#endif
   }
 }

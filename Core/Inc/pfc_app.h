@@ -30,6 +30,7 @@ typedef enum {
 } PFC_Fault_t;
 
 void PFC_App_Task(void);
+void PFC_App_OnInjectedCurrentIsr(void);
 PFC_State_t PFC_App_GetState(void);
 PFC_Fault_t PFC_App_GetFault(void);
 

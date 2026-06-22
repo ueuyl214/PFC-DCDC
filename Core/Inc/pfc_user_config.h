@@ -117,6 +117,7 @@
  * ========================================================= */
 #define PFC_PFC_ENABLE                    1
 #define PFC_TEST_PROFILE_18VAC_SIMPLE_PFC 1
+#define PFC_18VAC_FAST_ILOOP_TEST_ENABLE  1
 
 #if (PFC_TEST_PROFILE_18VAC_SIMPLE_PFC != 0)
 #define PFC_TEST_PROFILE_18VAC_PFC_RUN_32V 0
@@ -146,8 +147,10 @@
 #endif
 
 /* Current-loop scheduling */
-#define PFC_CURRENT_LOOP_HZ                1000.0f
-#define PFC_CURRENT_LOOP_PERIOD_US         1000U
+#define PFC_CURRENT_LOOP_IN_ISR_ENABLE     1
+#define PFC_CURRENT_LOOP_ISR_DECIMATION    5U
+#define PFC_CURRENT_LOOP_HZ                10000.0f
+#define PFC_CURRENT_LOOP_PERIOD_US         100U
 
 /* Keep the verified DC_I behavior as the default. Set this to 1 only after
  * the conservative average-current loop is stable with the current hardware.
@@ -170,9 +173,9 @@
 #define PFC_ILOOP_KP_SIMPLE                0.006f
 #define PFC_ILOOP_KI_SIMPLE                0.00005f
 
-#define PFC_ILOOP_KP_FAST                  0.018f
-#define PFC_ILOOP_KI_FAST                  0.00040f
-#define PFC_IL_CTRL_AVG_ALPHA_FAST         0.08f
+#define PFC_ILOOP_KP_FAST                  0.040f
+#define PFC_ILOOP_KI_FAST                  0.00006f
+#define PFC_IL_CTRL_AVG_ALPHA_FAST         0.35f
 #define PFC_DC_I_DUTY_BIAS_FAST            0.07f
 
 #if (PFC_DC_I_FAST_RESPONSE_ENABLE != 0)
@@ -192,8 +195,8 @@
 #define PFC_I_LOOP_ACCEL_KI_MULT           3.0f
 
 #define PFC_I_DUTY_SLEW_ENABLE             1
-#define PFC_I_DUTY_SLEW_UP_PER_TICK        0.003f
-#define PFC_I_DUTY_SLEW_DOWN_PER_TICK      0.006f
+#define PFC_I_DUTY_SLEW_UP_PER_TICK        0.0025f
+#define PFC_I_DUTY_SLEW_DOWN_PER_TICK      0.0100f
 
 /* Slow voltage loop. Use vbus_avg, not instantaneous vbus_v. */
 #define PFC_VLOOP_PERIOD_MS                20U
@@ -237,31 +240,21 @@
 #define PFC_DC_I_USE_DYNAMIC_FF            0
 #define PFC_DC_I_VBUS_LIMIT_V              20.0f
 
-#if (PFC_TEST_PROFILE_18VAC_AC_I != 0)
-#define PFC_AC_I_IAMP_INIT_A               0.03f
-#define PFC_AC_I_IAMP_MAX_A                0.05f
-#define PFC_AC_I_VBUS_LIMIT_V              32.0f
-#else
-#define PFC_AC_I_IAMP_INIT_A               0.10f
-#define PFC_AC_I_IAMP_MAX_A                0.10f
-#define PFC_AC_I_VBUS_LIMIT_V              24.0f
-#endif
+#define PFC_AC_I_IAMP_INIT_A               0.05f
+#define PFC_AC_I_IAMP_TARGET_A             0.20f
+#define PFC_AC_I_IAMP_MAX_A                0.25f
+#define PFC_AC_I_IAMP_SLEW_A               0.0010f
+#define PFC_AC_I_VBUS_LIMIT_V              35.0f
 #define PFC_AC_I_VIN_ENABLE_TH_V           3.0f
 #define PFC_AC_I_VIN_DISABLE_TH_V          1.5f
 #define PFC_AC_I_SHAPE_MIN                 0.05f
 #define PFC_AC_I_DUTY_FF_MAX               0.20f
 #define PFC_AC_I_DUTY_SLEW_ENABLE          1
-#if (PFC_TEST_PROFILE_18VAC_AC_I != 0)
-#define PFC_AC_I_DUTY_SLEW_UP_PER_TICK     0.004f
-#define PFC_AC_I_DUTY_SLEW_DOWN_PER_TICK   0.020f
-#define PFC_AC_I_DUTY_MAX                  0.10f
-#else
-#define PFC_AC_I_DUTY_SLEW_UP_PER_TICK     0.006f
-#define PFC_AC_I_DUTY_SLEW_DOWN_PER_TICK   0.020f
+#define PFC_AC_I_DUTY_SLEW_UP_PER_TICK     PFC_I_DUTY_SLEW_UP_PER_TICK
+#define PFC_AC_I_DUTY_SLEW_DOWN_PER_TICK   PFC_I_DUTY_SLEW_DOWN_PER_TICK
 #define PFC_AC_I_DUTY_MAX                  0.18f
-#endif
 #define PFC_AC_I_BOOST_MARGIN_ENABLE       1
-#define PFC_AC_I_BOOST_MARGIN_V            2.0f
+#define PFC_AC_I_BOOST_MARGIN_V            0.5f
 #define PFC_AC_I_MARGIN_BLANK_CLEAR_DUTY   1
 #define PFC_AC_I_MARGIN_BLANK_FREEZE_I     1
 #define PFC_PFC_RUN_DUTY_SLEW_ENABLE       1
@@ -269,10 +262,10 @@
 #define PFC_PFC_RUN_DUTY_SLEW_DOWN_PER_TICK 0.020f
 #if (PFC_TEST_PROFILE_18VAC_SIMPLE_PFC != 0)
 #define PFC_PFC_RUN_DUTY_MAX               0.18f
-#define PFC_SIMPLE_DUTY_LIMIT_INIT         0.04f
+#define PFC_SIMPLE_DUTY_LIMIT_INIT         0.06f
 #define PFC_SIMPLE_DUTY_LIMIT_TARGET       0.18f
-#define PFC_SIMPLE_DUTY_LIMIT_STEP         0.001f
-#define PFC_SIMPLE_DFF_ENABLE              0
+#define PFC_SIMPLE_DUTY_LIMIT_STEP         0.002f
+#define PFC_SIMPLE_DFF_ENABLE              1
 #define PFC_SIMPLE_MIN_IAMP_A              0.005f
 #define PFC_SIMPLE_MIN_IREF_A              0.003f
 #define PFC_SIMPLE_VBUS_HYST_V             0.30f
@@ -344,8 +337,8 @@
 #define PFC_PFC_PRECHARGE_DUTY_FF_MIN_VIN  3.0f
 
 #define PFC_PFC_SOFTSTART_USE_VLOOP        1
-#define PFC_PFC_SOFTSTART_IAMP_MAX_A       0.08f
-#define PFC_PFC_SOFTSTART_IAMP_SLEW_A      0.002f
+#define PFC_PFC_SOFTSTART_IAMP_MAX_A       0.20f
+#define PFC_PFC_SOFTSTART_IAMP_SLEW_A      0.0010f
 #define PFC_PFC_SOFTSTART_MIN_IAMP_A       0.003f
 
 #define PFC_PFC_VIN_RMS_FF_ENABLE          0
@@ -354,23 +347,12 @@
 #define PFC_PFC_VIN_FF_MAX_SCALE           2.00f
 
 #define PFC_AC_I_VBUS_DERATE_ENABLE        1
-#if (PFC_TEST_PROFILE_18VAC_AC_I != 0)
-#define PFC_AC_I_VBUS_DERATE_START_V       28.0f
-#define PFC_AC_I_VBUS_DERATE_END_V         32.0f
-#else
-#define PFC_AC_I_VBUS_DERATE_START_V       21.0f
-#define PFC_AC_I_VBUS_DERATE_END_V         24.0f
-#endif
+#define PFC_AC_I_VBUS_DERATE_START_V       33.0f
+#define PFC_AC_I_VBUS_DERATE_END_V         35.0f
 #define PFC_AC_CURRENT_TEST_IAMP_A         PFC_AC_I_IAMP_INIT_A
 #define PFC_IAMP_CMD_INIT_A                0.00f
 #define PFC_IAMP_CMD_MIN_A                 0.00f
-#if (PFC_TEST_PROFILE_18VAC_SIMPLE_PFC != 0)
-#define PFC_IAMP_CMD_MAX_A                 0.08f
-#elif (PFC_TEST_PROFILE_18VAC_PFC_RUN_32V != 0)
-#define PFC_IAMP_CMD_MAX_A                 0.08f
-#else
-#define PFC_IAMP_CMD_MAX_A                 0.12f
-#endif
+#define PFC_IAMP_CMD_MAX_A                 0.25f
 #define PFC_IAMP_MAX_A                     PFC_IAMP_CMD_MAX_A
 #define PFC_IREF_MAX_A                     0.60f
 
@@ -380,7 +362,7 @@
 #define PFC_PFC_DUTY_MAX                   0.20f
 
 /* PWM-synchronized current sampling */
-#define PFC_USE_SYNC_IL_FOR_CURRENT_LOOP   0
+#define PFC_USE_SYNC_IL_FOR_CURRENT_LOOP   1
 #define PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE   2000U
 #define PFC_IL_SYNC_STALE_TIMEOUT_MS       20U
 
@@ -412,6 +394,9 @@
 #define PFC_PFC_ILIMIT_A                   0.80f
 #define PFC_PFC_ILIMIT_TRIP_COUNT          5U
 #define PFC_PFC_ILIMIT_RELEASE_A           0.70f
+#define PFC_ISR_ILIMIT_A                   0.80f
+#define PFC_ISR_ILIMIT_TRIP_COUNT          5U
+#define PFC_ISR_ILIMIT_RELEASE_A           0.70f
 
 /* Synchronous high-side drive is disabled for the first DC Boost power tests. */
 #define PFC_ENABLE_SYNC_MODE             0
