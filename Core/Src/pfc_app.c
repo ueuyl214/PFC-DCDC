@@ -40,6 +40,7 @@ static uint8_t ac_rect_pwm_active = 0U;
 static uint8_t ac_rect_vin_enabled = 0U;
 static uint8_t il_ocp_cnt = 0U;
 static uint8_t il_rev_cnt = 0U;
+static uint8_t pfc_test_ilimit_cnt = 0U;
 static float pfc_vbus_avg = 0.0f;
 static float pfc_vbus_ref = PFC_VBUS_REF_INIT_V;
 static float pfc_vin_peak = 0.0f;
@@ -92,6 +93,7 @@ static float pfc_precharge_iref_cmd = PFC_PFC_PRECHARGE_IREF_INIT_A;
 static uint8_t pfc_dwt_ready = 0U;
 static float fault_vin_v = 0.0f;
 static float fault_il_a = 0.0f;
+static float fault_il_sync_a = 0.0f;
 static float fault_vbus_v = 0.0f;
 static float fault_duty = 0.0f;
 static float fault_iref = 0.0f;
@@ -231,6 +233,7 @@ static void PFC_CurrentProtectionCountersReset(void)
 {
   il_ocp_cnt = 0U;
   il_rev_cnt = 0U;
+  pfc_test_ilimit_cnt = 0U;
 }
 
 static float PFC_AcRectTargetVref(void)
@@ -510,6 +513,7 @@ static void PFC_EnterFault(PFC_Fault_t fault)
 {
   fault_vin_v = vac_abs_v;
   fault_il_a = il_a;
+  fault_il_sync_a = il_sync_a;
   fault_vbus_v = vbus_v;
   fault_duty = pfc_duty_cmd;
   fault_iref = pfc_iref_a;
@@ -2183,10 +2187,29 @@ static void PFC_CheckProtection(void)
     return;
   }
 
-  if ((PFC_IsPfcTestState() != 0U) && (il_a > PFC_PFC_ILIMIT_A))
+  if (PFC_IsPfcTestState() != 0U)
   {
-    PFC_EnterFault(PFC_FAULT_OCP);
-    return;
+    if (il_a > PFC_PFC_ILIMIT_A)
+    {
+      if (pfc_test_ilimit_cnt < PFC_PFC_ILIMIT_TRIP_COUNT)
+      {
+        pfc_test_ilimit_cnt++;
+      }
+    }
+    else if (il_a < PFC_PFC_ILIMIT_RELEASE_A)
+    {
+      pfc_test_ilimit_cnt = 0U;
+    }
+
+    if (pfc_test_ilimit_cnt >= PFC_PFC_ILIMIT_TRIP_COUNT)
+    {
+      PFC_EnterFault(PFC_FAULT_OCP);
+      return;
+    }
+  }
+  else
+  {
+    pfc_test_ilimit_cnt = 0U;
   }
 
   if ((PFC_IsPfcTestState() != 0U) && (il_a < PFC_IL_REVERSE_OCP_A))
@@ -2597,6 +2620,7 @@ static void PFC_UpdateDisplayPagePfcRun(char *line, size_t line_size, char *valu
 
 static void PFC_UpdateDisplayPageFault(char *line, size_t line_size, char *value, size_t value_size)
 {
+  char value2[12];
   uint32_t duty_pct;
 
   (void)snprintf(line, line_size, "STATE: FAULT");
@@ -2620,7 +2644,8 @@ static void PFC_UpdateDisplayPageFault(char *line, size_t line_size, char *value
   PFC_OLED_WriteLine(3U, line);
 
   PFC_FormatFixed(value, value_size, fault_il_a, 2U);
-  (void)snprintf(line, line_size, "IL :%s", value);
+  PFC_FormatFixed(value2, sizeof(value2), fault_il_sync_a, 2U);
+  (void)snprintf(line, line_size, "IL:%s IS:%s", value, value2);
   PFC_OLED_WriteLine(4U, line);
 
   PFC_FormatFixed(value, value_size, fault_vbus_v, 1U);

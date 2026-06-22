@@ -410,6 +410,8 @@
 #define PFC_PFC_TEST_VBUS_LIMIT_V          24.0f
 #endif
 #define PFC_PFC_ILIMIT_A                   0.80f
+#define PFC_PFC_ILIMIT_TRIP_COUNT          5U
+#define PFC_PFC_ILIMIT_RELEASE_A           0.70f
 
 /* Synchronous high-side drive is disabled for the first DC Boost power tests. */
 #define PFC_ENABLE_SYNC_MODE             0

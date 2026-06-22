@@ -35,6 +35,7 @@
 uint32_t pfc_pwm_error_code = 0U;
 static float pfc_pwm_duty = 0.0f;
 static uint8_t pfc_pwm_timer_configured = 0U;
+static uint8_t pfc_pwm_timer_running = 0U;
 
 static float PFC_PWM_LimitDuty(float duty)
 {
@@ -165,10 +166,10 @@ static uint8_t PFC_PWM_ConfigureTimer(void)
   timer_cfg.StartOnSync = HRTIM_SYNCSTART_DISABLED;
   timer_cfg.ResetOnSync = HRTIM_SYNCRESET_DISABLED;
   timer_cfg.DACSynchro = HRTIM_DACSYNC_NONE;
-  timer_cfg.PreloadEnable = HRTIM_PRELOAD_DISABLED;
+  timer_cfg.PreloadEnable = HRTIM_PRELOAD_ENABLED;
   timer_cfg.UpdateGating = HRTIM_UPDATEGATING_INDEPENDENT;
   timer_cfg.BurstMode = HRTIM_TIMERBURSTMODE_MAINTAINCLOCK;
-  timer_cfg.RepetitionUpdate = HRTIM_UPDATEONREPETITION_DISABLED;
+  timer_cfg.RepetitionUpdate = HRTIM_UPDATEONREPETITION_ENABLED;
   timer_cfg.PushPull = HRTIM_TIMPUSHPULLMODE_DISABLED;
   timer_cfg.FaultEnable = HRTIM_TIMFAULTENABLE_NONE;
   timer_cfg.FaultLock = HRTIM_TIMFAULTLOCK_READWRITE;
@@ -372,6 +373,7 @@ void PFC_PWM_AllOff(void)
   (void)HAL_HRTIM_WaveformOutputStop(&hhrtim1,
                                      HRTIM_OUTPUT_TA1 | HRTIM_OUTPUT_TA2 | PFC_PWM_OUTPUT_BOTH);
   (void)HAL_HRTIM_WaveformCountStop(&hhrtim1, HRTIM_TIMERID_TIMER_A | PFC_PWM_TIMER_ID);
+  pfc_pwm_timer_running = 0U;
 
   __HAL_HRTIM_SETCOMPARE(&hhrtim1,
                          PFC_PWM_TIMER_INDEX,
@@ -408,10 +410,13 @@ void PFC_PWM_SetDuty(float duty)
                          HRTIM_COMPAREUNIT_2,
                          adc_sync_compare);
 
-  if (PFC_PWM_CheckHal(HAL_HRTIM_SoftwareUpdate(&hhrtim1, PFC_PWM_TIMER_ID),
-                       PFC_PWM_ERR_UPDATE_DUTY) == 0U)
+  if (pfc_pwm_timer_running == 0U)
   {
-    return;
+    if (PFC_PWM_CheckHal(HAL_HRTIM_SoftwareUpdate(&hhrtim1, PFC_PWM_TIMER_ID),
+                         PFC_PWM_ERR_UPDATE_DUTY) == 0U)
+    {
+      return;
+    }
   }
 
   pfc_pwm_duty = limited;
@@ -462,8 +467,13 @@ static void PFC_PWM_StartLowSide(float initial_duty)
     return;
   }
 
-  (void)PFC_PWM_CheckHal(HAL_HRTIM_WaveformOutputStart(&hhrtim1, PFC_PWM_OUTPUT_LOW),
-                         PFC_PWM_ERR_OUTPUT_ASYNC);
+  if (PFC_PWM_CheckHal(HAL_HRTIM_WaveformOutputStart(&hhrtim1, PFC_PWM_OUTPUT_LOW),
+                       PFC_PWM_ERR_OUTPUT_ASYNC) == 0U)
+  {
+    return;
+  }
+
+  pfc_pwm_timer_running = 1U;
 }
 
 void PFC_PWM_StartAsync(void)
@@ -530,8 +540,13 @@ void PFC_PWM_StartSync(void)
     return;
   }
 
-  (void)PFC_PWM_CheckHal(HAL_HRTIM_WaveformOutputStart(&hhrtim1, PFC_PWM_OUTPUT_BOTH),
-                         PFC_PWM_ERR_OUTPUT_SYNC);
+  if (PFC_PWM_CheckHal(HAL_HRTIM_WaveformOutputStart(&hhrtim1, PFC_PWM_OUTPUT_BOTH),
+                       PFC_PWM_ERR_OUTPUT_SYNC) == 0U)
+  {
+    return;
+  }
+
+  pfc_pwm_timer_running = 1U;
 #endif
 }
 
