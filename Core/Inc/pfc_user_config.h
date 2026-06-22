@@ -363,7 +363,9 @@
 
 /* PWM-synchronized current sampling */
 #define PFC_USE_SYNC_IL_FOR_CURRENT_LOOP   1
-#define PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE   2000U
+#define PFC_ADC_SYNC_EDGE_BLANK_TICKS      1200U
+#define PFC_ADC_SYNC_TURNOFF_MARGIN_TICKS  800U
+#define PFC_ADC_SYNC_MIN_ON_TICKS          2500U
 #define PFC_IL_SYNC_STALE_TIMEOUT_MS       20U
 
 /* ADC injected timing diagnostic pulse.
@@ -394,9 +396,9 @@
 #define PFC_PFC_ILIMIT_A                   0.80f
 #define PFC_PFC_ILIMIT_TRIP_COUNT          5U
 #define PFC_PFC_ILIMIT_RELEASE_A           0.70f
-#define PFC_ISR_ILIMIT_A                   0.80f
-#define PFC_ISR_ILIMIT_TRIP_COUNT          5U
-#define PFC_ISR_ILIMIT_RELEASE_A           0.70f
+#define PFC_ISR_ILIMIT_A                   1.20f
+#define PFC_ISR_ILIMIT_TRIP_COUNT          8U
+#define PFC_ISR_ILIMIT_RELEASE_A           0.90f
 
 /* Synchronous high-side drive is disabled for the first DC Boost power tests. */
 #define PFC_ENABLE_SYNC_MODE             0

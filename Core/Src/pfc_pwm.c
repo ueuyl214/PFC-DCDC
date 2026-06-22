@@ -73,29 +73,31 @@ static uint32_t PFC_PWM_DutyCompareToAdcSyncCompare(uint32_t duty_compare)
 
   if (duty_compare == 0U)
   {
-    return PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE;
+    cmp2 = PFC_ADC_SYNC_EDGE_BLANK_TICKS;
   }
-
-  cmp2 = duty_compare / 2U;
-  if (cmp2 == 0U)
+  else if (duty_compare < PFC_ADC_SYNC_MIN_ON_TICKS)
   {
-    cmp2 = 1U;
-  }
-
-  if (duty_compare > (PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE * 2U))
-  {
-    if (cmp2 < PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE)
+    cmp2 = duty_compare / 2U;
+    if (cmp2 == 0U)
     {
-      cmp2 = PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE;
+      cmp2 = 1U;
     }
   }
   else
   {
-    /*
-     * Very small duty: the true on-time midpoint is close to an edge. Keep
-     * duty/2 for this first synchronized-sampling patch and rely on the
-     * current-loop fallback if the sample is not yet useful.
-     */
+    uint32_t target = duty_compare / 2U;
+    const uint32_t turnoff_limit = duty_compare - PFC_ADC_SYNC_TURNOFF_MARGIN_TICKS;
+
+    if (target < PFC_ADC_SYNC_EDGE_BLANK_TICKS)
+    {
+      target = PFC_ADC_SYNC_EDGE_BLANK_TICKS;
+    }
+    if (target > turnoff_limit)
+    {
+      target = turnoff_limit;
+    }
+
+    cmp2 = target;
   }
 
   if (cmp2 >= PFC_HRTIM_PERIOD)
@@ -195,7 +197,7 @@ static uint8_t PFC_PWM_ConfigureTimer(void)
     return 0U;
   }
 
-  compare_cfg.CompareValue = PFC_ADC_SYNC_MIN_TICKS_FROM_EDGE;
+  compare_cfg.CompareValue = PFC_ADC_SYNC_EDGE_BLANK_TICKS;
   if (PFC_PWM_CheckHal(HAL_HRTIM_WaveformCompareConfig(&hhrtim1,
                                                        PFC_PWM_TIMER_INDEX,
                                                        HRTIM_COMPAREUNIT_2,

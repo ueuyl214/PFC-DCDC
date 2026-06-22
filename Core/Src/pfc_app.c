@@ -104,6 +104,10 @@ static float fault_vbus_v = 0.0f;
 static float fault_duty = 0.0f;
 static float fault_iref = 0.0f;
 static PFC_State_t fault_prev_state = PFC_STATE_IDLE;
+static volatile float fault_peak_isr_il_sync_a = 0.0f;
+static volatile float fault_peak_isr_il_dma_a = 0.0f;
+static volatile float fault_peak_isr_duty = 0.0f;
+static volatile uint8_t fault_peak_isr_cnt = 0U;
 
 static void PFC_EnterFault(PFC_Fault_t fault);
 static void PFC_CurrentLoop_Task(float i_ref, uint8_t freeze_integrator);
@@ -241,6 +245,7 @@ static void PFC_CurrentProtectionCountersReset(void)
 {
   il_ocp_cnt = 0U;
   il_rev_cnt = 0U;
+  /* Fast test OCP now uses the PWM-synchronized injected current path. */
   pfc_test_ilimit_cnt = 0U;
   pfc_isr_ilimit_cnt = 0U;
 }
@@ -326,6 +331,10 @@ static void PFC_IsrControlReset(void)
   pfc_isr_ilimit_cnt = 0U;
   pfc_isr_fault_request = (uint8_t)PFC_FAULT_NONE;
   pfc_isr_headroom_ok_dbg = 0U;
+  fault_peak_isr_il_sync_a = 0.0f;
+  fault_peak_isr_il_dma_a = 0.0f;
+  fault_peak_isr_duty = 0.0f;
+  fault_peak_isr_cnt = 0U;
 }
 
 static void PFC_PfcControl_Reset(void)
@@ -531,6 +540,11 @@ static uint8_t PFC_PfcControl_Start(void)
 
 static void PFC_EnterFault(PFC_Fault_t fault)
 {
+  const float peak_isr_il_sync_a = fault_peak_isr_il_sync_a;
+  const float peak_isr_il_dma_a = fault_peak_isr_il_dma_a;
+  const float peak_isr_duty = fault_peak_isr_duty;
+  const uint8_t peak_isr_cnt = fault_peak_isr_cnt;
+
   fault_vin_v = vac_abs_v;
   fault_il_a = il_a;
   fault_il_sync_a = il_sync_a;
@@ -544,6 +558,13 @@ static void PFC_EnterFault(PFC_Fault_t fault)
   PFC_BoostLoop_Reset();
   PFC_AcRectLoop_Reset();
   PFC_PfcControl_Reset();
+  if (fault != PFC_FAULT_NONE)
+  {
+    fault_peak_isr_il_sync_a = peak_isr_il_sync_a;
+    fault_peak_isr_il_dma_a = peak_isr_il_dma_a;
+    fault_peak_isr_duty = peak_isr_duty;
+    fault_peak_isr_cnt = peak_isr_cnt;
+  }
   pfc_fault = fault;
   pfc_state = PFC_STATE_FAULT;
 }
@@ -1946,6 +1967,13 @@ void PFC_App_OnInjectedCurrentIsr(void)
     {
       pfc_isr_ilimit_cnt++;
     }
+    if (il_sync_a > fault_peak_isr_il_sync_a)
+    {
+      fault_peak_isr_il_sync_a = il_sync_a;
+      fault_peak_isr_il_dma_a = il_a;
+      fault_peak_isr_duty = pfc_duty_cmd;
+    }
+    fault_peak_isr_cnt = pfc_isr_ilimit_cnt;
   }
   else if (il_sync_a < PFC_ISR_ILIMIT_RELEASE_A)
   {
@@ -2580,36 +2608,7 @@ static void PFC_CheckProtection(void)
     return;
   }
 
-  if (PFC_IsPfcTestState() != 0U)
-  {
-    if (il_a > PFC_PFC_ILIMIT_A)
-    {
-      if (pfc_test_ilimit_cnt < PFC_PFC_ILIMIT_TRIP_COUNT)
-      {
-        pfc_test_ilimit_cnt++;
-      }
-    }
-    else if (il_a < PFC_PFC_ILIMIT_RELEASE_A)
-    {
-      pfc_test_ilimit_cnt = 0U;
-    }
-
-    if (pfc_test_ilimit_cnt >= PFC_PFC_ILIMIT_TRIP_COUNT)
-    {
-      PFC_EnterFault(PFC_FAULT_OCP);
-      return;
-    }
-  }
-  else
-  {
-    pfc_test_ilimit_cnt = 0U;
-  }
-
-  if ((PFC_IsPfcTestState() != 0U) && (il_a < PFC_IL_REVERSE_OCP_A))
-  {
-    PFC_EnterFault(PFC_FAULT_REV);
-    return;
-  }
+  pfc_test_ilimit_cnt = 0U;
 
   if (PFC_IsCurrentProtectionBlanked() != 0U)
   {
@@ -3105,11 +3104,12 @@ static void PFC_UpdateDisplayPageFault(char *line, size_t line_size, char *value
                  value);
   PFC_OLED_WriteLine(6U, line);
 
+  PFC_FormatFixed(value, value_size, fault_peak_isr_il_sync_a, 2U);
   (void)snprintf(line,
                  line_size,
-                 "E:%04lX F:%02u",
-                 (unsigned long)PFC_PWM_GetErrorCode(),
-                 (unsigned)pfc_fault);
+                 "PK:%s C:%u",
+                 value,
+                 (unsigned)fault_peak_isr_cnt);
   PFC_OLED_WriteLine(7U, line);
 }
 

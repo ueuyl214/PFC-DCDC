@@ -215,7 +215,7 @@ static uint8_t PFC_Measure_ConfigInjectedCurrent(void)
 
   inj_config.InjectedChannel = ADC_CHANNEL_2;                 /* PA1 / ADC1_IN2 = IL */
   inj_config.InjectedRank = ADC_INJECTED_RANK_1;
-  inj_config.InjectedSamplingTime = ADC_SAMPLETIME_92CYCLES_5;
+  inj_config.InjectedSamplingTime = ADC_SAMPLETIME_12CYCLES_5;
   inj_config.InjectedSingleDiff = ADC_SINGLE_ENDED;
   inj_config.InjectedOffsetNumber = ADC_OFFSET_NONE;
   inj_config.InjectedOffset = 0U;
