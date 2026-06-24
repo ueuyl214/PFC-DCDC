@@ -39,13 +39,22 @@ static uint8_t pfc_pwm_timer_running = 0U;
 
 static float PFC_PWM_LimitDuty(float duty)
 {
+  float duty_max = PFC_DUTY_OPENLOOP_MAX;
+
+#if (PFC_DEBUG_DC_I_USE_ISR_LOOP != 0)
+  if (PFC_DC_I_DUTY_MAX > duty_max)
+  {
+    duty_max = PFC_DC_I_DUTY_MAX;
+  }
+#endif
+
   if (duty < 0.0f)
   {
     return 0.0f;
   }
-  if (duty > PFC_DUTY_OPENLOOP_MAX)
+  if (duty > duty_max)
   {
-    return PFC_DUTY_OPENLOOP_MAX;
+    return duty_max;
   }
   return duty;
 }
@@ -503,6 +512,37 @@ void PFC_PWM_StartAcRectClosedLoopAtDuty(float duty)
   }
 
   PFC_PWM_StartLowSide(duty);
+}
+
+void PFC_PWM_StartAdcTriggerOnly(void)
+{
+  pfc_pwm_error_code = 0U;
+  if (PFC_PWM_ConfigureTimer() == 0U)
+  {
+    return;
+  }
+
+  PFC_PWM_AllOff();
+  if (pfc_pwm_error_code != 0U)
+  {
+    return;
+  }
+
+  PFC_PWM_SetDuty(0.0f);
+  if (pfc_pwm_error_code != 0U)
+  {
+    return;
+  }
+
+  __HAL_HRTIM_SETCOUNTER(&hhrtim1, PFC_PWM_TIMER_INDEX, 0U);
+  if (PFC_PWM_CheckHal(HAL_HRTIM_WaveformCountStart(&hhrtim1, PFC_PWM_TIMER_ID),
+                       PFC_PWM_ERR_COUNT_ASYNC) == 0U)
+  {
+    return;
+  }
+
+  /* Timer B runs only to generate CMP2 injected ADC triggers; TB2 stays off. */
+  pfc_pwm_timer_running = 1U;
 }
 
 void PFC_PWM_StartSync(void)

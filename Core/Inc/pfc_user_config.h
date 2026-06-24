@@ -126,6 +126,8 @@
 #define PFC_PFC_ENABLE                    1
 #define PFC_TEST_PROFILE_18VAC_SIMPLE_PFC 1
 #define PFC_18VAC_FAST_ILOOP_TEST_ENABLE  1
+#define PFC_DEBUG_FORCE_DC_CURRENT_LOOP   1
+#define PFC_DEBUG_DC_I_USE_ISR_LOOP       1
 
 #if (PFC_TEST_PROFILE_18VAC_SIMPLE_PFC != 0)
 #define PFC_TEST_PROFILE_18VAC_PFC_RUN_32V 0
@@ -191,13 +193,13 @@
 #define PFC_IL_CTRL_AVG_ALPHA              0.05f
 #define PFC_DC_I_DUTY_BIAS                 0.07f
 
-#define PFC_ILOOP_KP_SIMPLE                0.018f
-#define PFC_ILOOP_KI_SIMPLE                0.000015f
-#define PFC_IL_CTRL_AVG_ALPHA_SIMPLE       0.22f
+#define PFC_ILOOP_KP_SIMPLE                0.060f
+#define PFC_ILOOP_KI_SIMPLE                0.0030f
+#define PFC_IL_CTRL_AVG_ALPHA_SIMPLE       0.35f
 
-#define PFC_ILOOP_KP_FAST                  0.018f
-#define PFC_ILOOP_KI_FAST                  0.000015f
-#define PFC_IL_CTRL_AVG_ALPHA_FAST         0.22f
+#define PFC_ILOOP_KP_FAST                  0.060f
+#define PFC_ILOOP_KI_FAST                  0.0030f
+#define PFC_IL_CTRL_AVG_ALPHA_FAST         0.35f
 #define PFC_DC_I_DUTY_BIAS_FAST            0.07f
 
 #if (PFC_DC_I_FAST_RESPONSE_ENABLE != 0)
@@ -247,8 +249,8 @@
 
 /* Debug-stage current limits. Start very conservative. */
 #define PFC_DC_CURRENT_TEST_REF_1_A        0.10f
-#define PFC_DC_CURRENT_TEST_REF_2_A        0.15f
-#define PFC_DC_CURRENT_TEST_REF_3_A        0.20f
+#define PFC_DC_CURRENT_TEST_REF_2_A        0.20f
+#define PFC_DC_CURRENT_TEST_REF_3_A        0.30f
 #define PFC_DC_CURRENT_TEST_REF_SEL        1
 
 #if (PFC_DC_CURRENT_TEST_REF_SEL == 1)
@@ -260,7 +262,8 @@
 #endif
 
 #define PFC_DC_I_USE_DYNAMIC_FF            0
-#define PFC_DC_I_VBUS_LIMIT_V              20.0f
+#define PFC_DC_I_VBUS_LIMIT_V              PFC_VBUS_OVP_SOFT_V
+#define PFC_DC_I_DUTY_MAX                  0.60f
 
 #define PFC_AC_I_IAMP_INIT_A               0.02f
 #define PFC_AC_I_IAMP_TARGET_A             0.08f

@@ -15,6 +15,7 @@ void PFC_PWM_StartAsync(void);
 void PFC_PWM_StartBoostClosedLoop(void);
 void PFC_PWM_StartAcRectClosedLoop(void);
 void PFC_PWM_StartAcRectClosedLoopAtDuty(float duty);
+void PFC_PWM_StartAdcTriggerOnly(void);
 void PFC_PWM_StartSync(void);
 void PFC_PWM_Stop(void);
 
