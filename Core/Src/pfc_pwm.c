@@ -495,6 +495,13 @@ void PFC_PWM_StartAcRectClosedLoop(void)
 
 void PFC_PWM_StartAcRectClosedLoopAtDuty(float duty)
 {
+  if (duty <= PFC_PFC_DUTY_MIN_ACTIVE)
+  {
+    pfc_pwm_error_code = 0U;
+    PFC_PWM_AllOff();
+    return;
+  }
+
   PFC_PWM_StartLowSide(duty);
 }
 

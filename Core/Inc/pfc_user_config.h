@@ -163,7 +163,7 @@
 /* 18Vac open-loop 2% duty bring-up test. This state intentionally bypasses
  * PFC voltage/current loops and only keeps basic PWM/VBUS/sync-current guards.
  */
-#define PFC_OPENLOOP_2PCT_TEST_ENABLE          1
+#define PFC_OPENLOOP_2PCT_TEST_ENABLE          0
 #define PFC_OPENLOOP_2PCT_DUTY                 0.120f
 #define PFC_OPENLOOP_2PCT_DUTY_MAX             0.120f
 #define PFC_OPENLOOP_2PCT_VBUS_LIMIT_V         35.0f
@@ -270,6 +270,9 @@
 #define PFC_AC_I_VIN_ENABLE_TH_V           3.0f
 #define PFC_AC_I_VIN_DISABLE_TH_V          1.5f
 #define PFC_AC_I_SHAPE_MIN                 0.05f
+#define PFC_AC_I_IREF_MIN_A                0.0001f
+#define PFC_AC_I_START_DUTY                0.006f
+#define PFC_AC_I_START_DUTY_MAX            0.010f
 #define PFC_AC_I_DFF_ENABLE                0
 #define PFC_AC_I_DUTY_FF_MAX               0.20f
 #define PFC_AC_I_DUTY_SLEW_ENABLE          1
