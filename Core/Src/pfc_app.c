@@ -1213,7 +1213,7 @@ static void PFC_FormalPfcTask(void)
 
     PFC_FormalPfcVoltageLoop();
     if ((pfc_vbus_ref >= PFC_VBUS_REF_TARGET_V) &&
-        (pfc_vbus_ctrl_v >= PFC_VBUS_NORMAL_MIN_V))
+        (pfc_vbus_ctrl_v >= PFC_RUN_ENTER_VBUS_MIN_V))
     {
       pfc_state = PFC_STATE_PFC_RUN;
     }
@@ -1992,6 +1992,17 @@ static void PFC_CurrentLoop_Task(float i_ref, uint8_t freeze_integrator)
   uint8_t simple_pfc_active = 0U;
 #endif
 
+#if (PFC_PROFILE_SOFTSTART_RUN_ENABLE != 0)
+  if ((pfc_state == PFC_STATE_PFC_SOFTSTART) || (pfc_state == PFC_STATE_PFC_RUN))
+  {
+    /*
+     * Formal PFC always uses the 10 kHz injected-current ISR loop. Do not let
+     * the legacy main-loop path apply old PFC_RUN duty or headroom limits.
+     */
+    return;
+  }
+#endif
+
   now_us = PFC_GetMicros();
   if ((now_us - pfc_current_loop_last_us) < PFC_CURRENT_LOOP_PERIOD_US)
   {
@@ -2484,6 +2495,26 @@ static void PFC_CurrentLoop_Core_Isr(float i_ref, float il_feedback, float duty_
   if ((pfc_state == PFC_STATE_PFC_SOFTSTART) ||
       ((PFC_PROFILE_SOFTSTART_RUN_ENABLE != 0) && (pfc_state == PFC_STATE_PFC_RUN)))
   {
+    pfc_iref_a = PFC_ClampFloat(i_ref, 0.0f, PFC_IREF_ABS_MAX_A);
+  }
+  else if (pfc_state == PFC_STATE_DC_CURRENT_TEST)
+  {
+    pfc_iref_a = PFC_ClampFloat(i_ref, 0.0f, PFC_DC_CURRENT_TEST_REF_3_A);
+  }
+  else
+  {
+    pfc_iref_a = PFC_ClampFloat(i_ref, 0.0f, PFC_IREF_MAX_A);
+  }
+  pfc_il_ctrl_avg += il_alpha * (il_feedback - pfc_il_ctrl_avg);
+  pfc_il_feedback_used = pfc_il_ctrl_avg;
+  pfc_il_feedback_dbg = pfc_il_feedback_used;
+  pfc_i_err_a = pfc_iref_a - pfc_il_feedback_dbg;
+  pfc_iref_dbg = pfc_iref_a;
+  i_err = pfc_i_err_a;
+
+  if ((pfc_state == PFC_STATE_PFC_SOFTSTART) ||
+      ((PFC_PROFILE_SOFTSTART_RUN_ENABLE != 0) && (pfc_state == PFC_STATE_PFC_RUN)))
+  {
     const float dff_max = (pfc_state == PFC_STATE_PFC_SOFTSTART)
                               ? PFC_DFF_MAX_SOFTSTART
                               : PFC_DFF_MAX_RUN;
@@ -2503,21 +2534,6 @@ static void PFC_CurrentLoop_Core_Isr(float i_ref, float il_feedback, float duty_
 #endif
   }
   else if (pfc_state == PFC_STATE_DC_CURRENT_TEST)
-  {
-    pfc_iref_a = PFC_ClampFloat(i_ref, 0.0f, PFC_DC_CURRENT_TEST_REF_3_A);
-  }
-  else
-  {
-    pfc_iref_a = PFC_ClampFloat(i_ref, 0.0f, PFC_IREF_MAX_A);
-  }
-  pfc_il_ctrl_avg += il_alpha * (il_feedback - pfc_il_ctrl_avg);
-  pfc_il_feedback_used = pfc_il_ctrl_avg;
-  pfc_il_feedback_dbg = pfc_il_feedback_used;
-  pfc_i_err_a = pfc_iref_a - pfc_il_feedback_dbg;
-  pfc_iref_dbg = pfc_iref_a;
-  i_err = pfc_i_err_a;
-
-  if (pfc_state == PFC_STATE_DC_CURRENT_TEST)
   {
     if (vbus_v > 1.0f)
     {

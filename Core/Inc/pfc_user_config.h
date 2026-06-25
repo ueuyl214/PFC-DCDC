@@ -268,6 +268,7 @@
 
 #define PFC_VBUS_NORMAL_MIN_V              42.0f
 #define PFC_VBUS_NORMAL_MAX_V              54.0f
+#define PFC_RUN_ENTER_VBUS_MIN_V           46.0f
 
 /* Formal PFC measurement filters. */
 #define PFC_VAC_FAST_ALPHA                 0.25f
