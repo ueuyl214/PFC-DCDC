@@ -25,6 +25,9 @@ float vac_inst_v = 0.0f;
 float vac_abs_v = 0.0f;
 float vbus_v = 0.0f;
 float il_a = 0.0f;
+float pfc_vac_fast_v = 0.0f;
+float pfc_vbus_fast_v = 0.0f;
+float pfc_vbus_ctrl_v = 0.0f;
 
 float vac_rms_v = 0.0f;
 float il_rms_a = 0.0f;
@@ -46,6 +49,10 @@ static float filt_il_raw = 0.0f;
 static float filt_vbus_raw = 0.0f;
 static float filt_vrefint_raw = 0.0f;
 static uint8_t filter_seeded = 0U;
+static float pfc_vbus_line_sum = 0.0f;
+static uint32_t pfc_vbus_line_count = 0U;
+static uint32_t pfc_vbus_line_last_ms = 0U;
+static uint8_t pfc_control_filter_seeded = 0U;
 
 static float PFC_AbsFloat(float value)
 {
@@ -252,6 +259,13 @@ void PFC_Measure_Start(void)
   }
 
   filter_seeded = 0U;
+  pfc_vac_fast_v = 0.0f;
+  pfc_vbus_fast_v = 0.0f;
+  pfc_vbus_ctrl_v = 0.0f;
+  pfc_vbus_line_sum = 0.0f;
+  pfc_vbus_line_count = 0U;
+  pfc_vbus_line_last_ms = HAL_GetTick();
+  pfc_control_filter_seeded = 0U;
   raw_il_sync = 0U;
   il_sync_adc_v = 0.0f;
   il_sync_a = 0.0f;
@@ -373,6 +387,7 @@ void PFC_Measure_Update(void)
   const uint16_t dma_il = adc_dma_buf[PFC_ADC_BUF_IL];
   const uint16_t dma_vbus = adc_dma_buf[PFC_ADC_BUF_VBUS];
   const uint16_t dma_vrefint = adc_dma_buf[PFC_ADC_BUF_VREFINT];
+  const uint32_t now_ms = HAL_GetTick();
 
   if (filter_seeded == 0U)
   {
@@ -405,6 +420,31 @@ void PFC_Measure_Update(void)
   vac_inst_v = (vac_adc_v - PFC_VAC_ZERO_V) * PFC_VAC_GAIN;
   vac_abs_v = PFC_AbsFloat(vac_inst_v);
   vbus_v = (vbus_adc_v - PFC_VBUS_ZERO_V) * PFC_VBUS_GAIN;
+
+  if (pfc_control_filter_seeded == 0U)
+  {
+    pfc_vac_fast_v = vac_abs_v;
+    pfc_vbus_fast_v = vbus_v;
+    pfc_vbus_ctrl_v = vbus_v;
+    pfc_control_filter_seeded = 1U;
+  }
+  else
+  {
+    pfc_vac_fast_v += PFC_VAC_FAST_ALPHA * (vac_abs_v - pfc_vac_fast_v);
+    pfc_vbus_fast_v += PFC_VBUS_FAST_ALPHA * (vbus_v - pfc_vbus_fast_v);
+  }
+
+  pfc_vbus_line_sum += pfc_vbus_fast_v;
+  pfc_vbus_line_count++;
+  if ((now_ms - pfc_vbus_line_last_ms) >= PFC_VBUS_LINE_AVG_PERIOD_MS)
+  {
+    const float line_avg = pfc_vbus_line_sum / (float)pfc_vbus_line_count;
+
+    pfc_vbus_ctrl_v += PFC_VBUS_CTRL_ALPHA * (line_avg - pfc_vbus_ctrl_v);
+    pfc_vbus_line_sum = 0.0f;
+    pfc_vbus_line_count = 0U;
+    pfc_vbus_line_last_ms = now_ms;
+  }
 
   if (PFC_IL_GAIN_V_PER_A > 0.000001f)
   {

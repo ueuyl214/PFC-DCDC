@@ -36,6 +36,9 @@ extern float vac_inst_v;
 extern float vac_abs_v;
 extern float vbus_v;
 extern float il_a;
+extern float pfc_vac_fast_v;
+extern float pfc_vbus_fast_v;
+extern float pfc_vbus_ctrl_v;
 
 extern float vac_rms_v;
 extern float il_rms_a;

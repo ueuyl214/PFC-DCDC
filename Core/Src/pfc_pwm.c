@@ -39,22 +39,13 @@ static uint8_t pfc_pwm_timer_running = 0U;
 
 static float PFC_PWM_LimitDuty(float duty)
 {
-  float duty_max = PFC_DUTY_OPENLOOP_MAX;
-
-#if (PFC_DEBUG_DC_I_USE_ISR_LOOP != 0)
-  if (PFC_DC_I_DUTY_MAX > duty_max)
-  {
-    duty_max = PFC_DC_I_DUTY_MAX;
-  }
-#endif
-
   if (duty < 0.0f)
   {
     return 0.0f;
   }
-  if (duty > duty_max)
+  if (duty > PFC_PWM_ABSOLUTE_DUTY_MAX)
   {
-    return duty_max;
+    return PFC_PWM_ABSOLUTE_DUTY_MAX;
   }
   return duty;
 }
