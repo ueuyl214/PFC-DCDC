@@ -184,6 +184,7 @@
 #define PFC_OPENLOOP_2PCT_OCP_RELEASE_A        2.00f
 
 /* Independent AC open-loop duty ramp for power-stage capability testing. */
+#define PFC_DEBUG_FORCE_AC_OL_RAMP_TEST        0
 #define PFC_AC_OL_DUTY_INIT                    0.05f
 #define PFC_AC_OL_DUTY_MAX                     0.60f
 #define PFC_AC_OL_DUTY_STEP                    0.001f
@@ -284,6 +285,26 @@
 #define PFC_VBUS_FAST_ALPHA                0.08f
 #define PFC_VBUS_CTRL_ALPHA                0.20f
 #define PFC_VBUS_LINE_AVG_PERIOD_MS        20U
+
+/* Formal DCM Boost PFC: one duty update per 50 Hz line cycle. */
+#define PFC_DCM_PFC_ENABLE                     1
+/* Reserved until a blended DCM/current-shape handoff is implemented. */
+#define PFC_DCM_PFC_AUTO_ENTER_SHAPE_ENABLE    0
+#define PFC_DCM_DUTY_INIT                      0.40f
+#define PFC_DCM_DUTY_MIN                       0.05f
+#define PFC_DCM_DUTY_MAX                       0.65f
+#define PFC_DCM_VBUS_TARGET_V                  48.0f
+#define PFC_DCM_VBUS_LOW_V                     47.0f
+#define PFC_DCM_VBUS_HIGH_V                    49.5f
+#define PFC_DCM_VBUS_FAST_DEC_V                52.0f
+#define PFC_DCM_VBUS_PWM_OFF_V                 54.0f
+#define PFC_DCM_UPDATE_PERIOD_MS               20U
+#define PFC_DCM_DUTY_STEP_UP                   0.0015f
+#define PFC_DCM_DUTY_STEP_DOWN                 0.0010f
+#define PFC_DCM_DUTY_FAST_DOWN                 0.0200f
+#define PFC_DCM_VIN_BLANK_V                    1.5f
+#define PFC_DCM_IL_HARD_FAULT_A                5.0f
+#define PFC_DCM_IL_CLIP_WARN_A                 3.5f
 
 /* Formal PFC soft-start and power limiting. */
 #define PFC_PASSIVE_CHARGE_MS              500U
