@@ -183,6 +183,15 @@
 #define PFC_OPENLOOP_2PCT_OCP_TRIP_COUNT       5U
 #define PFC_OPENLOOP_2PCT_OCP_RELEASE_A        2.00f
 
+/* Independent AC open-loop duty ramp for power-stage capability testing. */
+#define PFC_AC_OL_DUTY_INIT                    0.05f
+#define PFC_AC_OL_DUTY_MAX                     0.60f
+#define PFC_AC_OL_DUTY_STEP                    0.001f
+#define PFC_AC_OL_PERIOD_MS                    20U
+#define PFC_AC_OL_VBUS_STOP_V                  50.0f
+#define PFC_AC_OL_VBUS_FAULT_V                 55.0f
+#define PFC_AC_OL_IL_FAULT_A                   5.0f
+
 /* Keep the verified DC_I behavior as the default. Set this to 1 only after
  * the conservative average-current loop is stable with the current hardware.
  */
@@ -281,10 +290,11 @@
 #define PFC_PASSIVE_IL_WARN_A              3.0f
 #define PFC_PASSIVE_IL_FAULT_A             5.0f
 #define PFC_PIN_LIMIT_INIT_W               3.0f
-#define PFC_PIN_LIMIT_TARGET_W             8.0f
+#define PFC_PIN_LIMIT_TARGET_W             12.0f
 #define PFC_PIN_LIMIT_RAMP_W               0.05f
-#define PFC_IAMP_LIMIT_ABS_MAX_A           1.20f
+#define PFC_IAMP_LIMIT_ABS_MAX_A           1.50f
 #define PFC_IREF_ABS_MAX_A                 3.50f
+#define PFC_FORMAL_USE_SYNC_IL_FEEDBACK    0
 
 #define PFC_VIN_BLANK_V                    2.0f
 #define PFC_SHAPE_MIN                      0.03f
@@ -292,8 +302,8 @@
 #define PFC_HEADROOM_MARGIN_RUN_V          1.5f
 
 #define PFC_ILOOP_INT_MIN_FORMAL           -0.10f
-#define PFC_ILOOP_INT_MAX_SOFTSTART        0.35f
-#define PFC_ILOOP_INT_MAX_RUN              0.45f
+#define PFC_ILOOP_INT_MAX_SOFTSTART        0.55f
+#define PFC_ILOOP_INT_MAX_RUN              0.65f
 
 #define PFC_DFF_ENABLE                     1
 #define PFC_DFF_SHAPE_ENABLE_TH            0.45f
@@ -303,8 +313,8 @@
 #define PFC_DFF_MAX_RUN_SAFE               0.30f
 #define PFC_DFF_MAX_SOFTSTART              0.45f
 #define PFC_DFF_MAX_RUN                    0.70f
-#define PFC_DUTY_MAX_SOFTSTART             0.45f
-#define PFC_DUTY_MAX_RUN                   0.55f
+#define PFC_DUTY_MAX_SOFTSTART             0.60f
+#define PFC_DUTY_MAX_RUN                   0.70f
 #define PFC_PWM_ABSOLUTE_DUTY_MAX          0.80f
 
 /* Formal PFC protection thresholds. */

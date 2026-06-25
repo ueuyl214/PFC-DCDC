@@ -163,6 +163,9 @@ static volatile float openloop_last_is = 0.0f;
 static volatile float openloop_last_il = 0.0f;
 static volatile uint32_t openloop_isr_count = 0U;
 static volatile uint8_t openloop_ocp_cnt = 0U;
+static volatile float ac_ol_duty = PFC_AC_OL_DUTY_INIT;
+static uint32_t ac_ol_last_step_ms = 0U;
+static volatile float ac_ol_peak_current_a = 0.0f;
 
 static void PFC_EnterFault(PFC_Fault_t fault);
 static void PFC_CurrentLoop_Task(float i_ref, uint8_t freeze_integrator);
@@ -292,6 +295,8 @@ static const char *PFC_StateName(PFC_State_t state)
       return "DC_I";
     case PFC_STATE_OPENLOOP_2PCT_TEST:
       return "OPEN_2PCT";
+    case PFC_STATE_AC_OPEN_DUTY_RAMP_TEST:
+      return "AC_OL_RAMP";
     case PFC_STATE_AC_CURRENT_SHAPE_TEST:
       return "AC_I";
     case PFC_STATE_PFC_SOFTSTART:
@@ -2769,6 +2774,29 @@ void PFC_App_OnInjectedCurrentIsr(void)
   uint8_t is_ac_i = 0U;
   uint8_t is_pfc_shape = 0U;
 
+  if (pfc_state == PFC_STATE_AC_OPEN_DUTY_RAMP_TEST)
+  {
+    const float il_sync_abs = (il_sync_a >= 0.0f) ? il_sync_a : -il_sync_a;
+    const float il_dma_abs = (il_a >= 0.0f) ? il_a : -il_a;
+    const float il_peak = (il_sync_abs > il_dma_abs) ? il_sync_abs : il_dma_abs;
+
+    if (il_peak > ac_ol_peak_current_a)
+    {
+      ac_ol_peak_current_a = il_peak;
+      fault_peak_isr_il_sync_a = il_sync_a;
+      fault_peak_isr_il_dma_a = il_a;
+      fault_peak_isr_duty = ac_ol_duty;
+    }
+
+    if (il_sync_abs > PFC_AC_OL_IL_FAULT_A)
+    {
+      PFC_PWM_SetDuty(0.0f);
+      fault_peak_isr_cnt = 1U;
+      pfc_isr_fault_request = (uint8_t)PFC_FAULT_OCP;
+    }
+    return;
+  }
+
   if (pfc_state == PFC_STATE_OPENLOOP_2PCT_TEST)
   {
     openloop_last_is = il_sync_a;
@@ -2928,6 +2956,7 @@ void PFC_App_OnInjectedCurrentIsr(void)
   if ((pfc_state == PFC_STATE_PFC_SOFTSTART) || (pfc_state == PFC_STATE_PFC_RUN))
   {
     float iref;
+    float il_feedback_formal;
     float duty_max;
     float headroom_margin;
     const float il_abs = PFC_AbsValue(il_sync_a);
@@ -3037,7 +3066,12 @@ void PFC_App_OnInjectedCurrentIsr(void)
     duty_max = (pfc_state == PFC_STATE_PFC_SOFTSTART)
                    ? PFC_DUTY_MAX_SOFTSTART
                    : PFC_DUTY_MAX_RUN;
-    PFC_CurrentLoop_Core_Isr(iref, il_sync_a, duty_max);
+#if (PFC_FORMAL_USE_SYNC_IL_FEEDBACK != 0)
+    il_feedback_formal = il_sync_a;
+#else
+    il_feedback_formal = il_a;
+#endif
+    PFC_CurrentLoop_Core_Isr(iref, il_feedback_formal, duty_max);
     return;
   }
 #endif
@@ -3411,6 +3445,46 @@ static void PFC_OpenLoop2PctTask(void)
 #endif
 }
 
+static void PFC_AcOpenDutyRampTask(void)
+{
+  const uint32_t now_ms = HAL_GetTick();
+
+  if (pfc_state != PFC_STATE_AC_OPEN_DUTY_RAMP_TEST)
+  {
+    return;
+  }
+
+  PFC_UpdatePfcMeasurements();
+
+  if ((now_ms - ac_ol_last_step_ms) < PFC_AC_OL_PERIOD_MS)
+  {
+    return;
+  }
+  ac_ol_last_step_ms = now_ms;
+
+  if (vbus_v < PFC_AC_OL_VBUS_STOP_V)
+  {
+    ac_ol_duty += PFC_AC_OL_DUTY_STEP;
+  }
+  else
+  {
+    ac_ol_duty -= PFC_AC_OL_DUTY_STEP;
+  }
+  ac_ol_duty = PFC_ClampFloat(ac_ol_duty,
+                              PFC_AC_OL_DUTY_INIT,
+                              PFC_AC_OL_DUTY_MAX);
+
+  pfc_duty_cmd = ac_ol_duty;
+  pfc_duty_raw_dbg = ac_ol_duty;
+  pfc_duty_out_dbg = ac_ol_duty;
+  PFC_PWM_SetDuty(ac_ol_duty);
+
+  if (PFC_PWM_GetErrorCode() != 0U)
+  {
+    PFC_EnterFault(PFC_FAULT_PWM);
+  }
+}
+
 static void PFC_PfcTask(void)
 {
 #if (PFC_PFC_ENABLE != 0)
@@ -3702,6 +3776,34 @@ static void PFC_EnterState(PFC_State_t next_state)
 #endif
       break;
 
+    case PFC_STATE_AC_OPEN_DUTY_RAMP_TEST:
+      PFC_PWM_AllOff();
+      PFC_PfcControl_Reset();
+      PFC_CurrentProtectionCountersReset();
+      ac_ol_duty = PFC_AC_OL_DUTY_INIT;
+      ac_ol_last_step_ms = HAL_GetTick();
+      ac_ol_peak_current_a = 0.0f;
+      pfc_duty_ff = 0.0f;
+      pfc_duty_pi = 0.0f;
+      pfc_duty_cmd = ac_ol_duty;
+      pfc_duty_raw_dbg = ac_ol_duty;
+      pfc_duty_slew_dbg = 0.0f;
+      pfc_duty_out_dbg = ac_ol_duty;
+      pfc_iref_a = 0.0f;
+      pfc_iref_dbg = 0.0f;
+      pfc_i_err_a = 0.0f;
+      PFC_PWM_StartAcRectClosedLoopAtDuty(ac_ol_duty);
+      if (PFC_PWM_GetErrorCode() != 0U)
+      {
+        PFC_EnterFault(PFC_FAULT_PWM);
+      }
+      else
+      {
+        pfc_pwm_active = 1U;
+        pfc_state = PFC_STATE_AC_OPEN_DUTY_RAMP_TEST;
+      }
+      break;
+
     case PFC_STATE_DC_CURRENT_TEST:
 #if (PFC_PFC_ENABLE != 0)
       PFC_DcCurrentTestReset();
@@ -3898,8 +4000,9 @@ static void PFC_HandleButton(void)
       PFC_EnterState(PFC_STATE_ADC_TEST);
       break;
     case PFC_STATE_ADC_TEST:
-      PFC_EnterState(PFC_STATE_PFC_SOFTSTART);
+      PFC_EnterState(PFC_STATE_AC_OPEN_DUTY_RAMP_TEST);
       break;
+    case PFC_STATE_AC_OPEN_DUTY_RAMP_TEST:
     case PFC_STATE_PFC_SOFTSTART:
     case PFC_STATE_PFC_RUN:
       PFC_EnterState(PFC_STATE_IDLE);
@@ -4031,6 +4134,34 @@ static void PFC_CheckProtection(void)
 
   if (PFC_HandleIsrFaultRequest() != 0U)
   {
+    return;
+  }
+
+  if (pfc_state == PFC_STATE_AC_OPEN_DUTY_RAMP_TEST)
+  {
+    const float il_sync_abs = (il_sync_a >= 0.0f) ? il_sync_a : -il_sync_a;
+
+    if (PFC_PWM_GetErrorCode() != 0U)
+    {
+      PFC_EnterFault(PFC_FAULT_PWM);
+      return;
+    }
+
+    if (vbus_v > PFC_AC_OL_VBUS_FAULT_V)
+    {
+      PFC_EnterFault(PFC_FAULT_OVP);
+      return;
+    }
+
+    if (il_sync_abs > PFC_AC_OL_IL_FAULT_A)
+    {
+      PFC_EnterFault(PFC_FAULT_OCP);
+      return;
+    }
+
+    pfc_test_ilimit_cnt = 0U;
+    il_ocp_cnt = 0U;
+    il_rev_cnt = 0U;
     return;
   }
 
@@ -4369,6 +4500,53 @@ static void PFC_UpdateDisplayPageOpenLoop2Pct(char *line, size_t line_size, char
   PFC_OLED_WriteLine(7U, line);
 }
 
+static void PFC_UpdateDisplayPageAcOpenDutyRamp(char *line,
+                                                size_t line_size,
+                                                char *value,
+                                                size_t value_size)
+{
+  char value2[12];
+  const uint32_t duty_pct = (uint32_t)((ac_ol_duty * 100.0f) + 0.5f);
+  const uint32_t duty_max_pct = (uint32_t)((PFC_AC_OL_DUTY_MAX * 100.0f) + 0.5f);
+
+  (void)snprintf(line, line_size, "AC OL RAMP");
+  PFC_OLED_WriteLine(0U, line);
+
+  PFC_FormatFixed(value, value_size, vbus_v, 1U);
+  PFC_FormatFixed(value2, sizeof(value2), pfc_vin_peak, 1U);
+  (void)snprintf(line, line_size, "VB:%s PK:%s", value, value2);
+  PFC_OLED_WriteLine(1U, line);
+
+  PFC_FormatFixed(value, value_size, vac_abs_v, 1U);
+  (void)snprintf(line, line_size, "VA:%s", value);
+  PFC_OLED_WriteLine(2U, line);
+
+  PFC_FormatFixed(value, value_size, il_a, 2U);
+  PFC_FormatFixed(value2, sizeof(value2), il_sync_a, 2U);
+  (void)snprintf(line, line_size, "ILa:%s IS:%s", value, value2);
+  PFC_OLED_WriteLine(3U, line);
+
+  (void)snprintf(line,
+                 line_size,
+                 "D:%02lu DMAX:%02lu",
+                 (unsigned long)duty_pct,
+                 (unsigned long)duty_max_pct);
+  PFC_OLED_WriteLine(4U, line);
+
+  PFC_FormatFixed(value, value_size, ac_ol_peak_current_a, 2U);
+  (void)snprintf(line, line_size, "PKI:%s", value);
+  PFC_OLED_WriteLine(5U, line);
+
+  (void)snprintf(line,
+                 line_size,
+                 "E:%04lX",
+                 (unsigned long)PFC_PWM_GetErrorCode());
+  PFC_OLED_WriteLine(6U, line);
+
+  (void)snprintf(line, line_size, "PWM:%u", (unsigned)pfc_pwm_active);
+  PFC_OLED_WriteLine(7U, line);
+}
+
 static void PFC_UpdateDisplayPageDcCurrent(char *line, size_t line_size, char *value, size_t value_size)
 {
   char value2[12];
@@ -4581,16 +4759,23 @@ static void PFC_UpdateDisplayPageFormalPfc(char *line,
 {
   char value2[12];
   uint32_t duty_pct;
+  uint32_t duty_max_pct;
   uint32_t ff_pct;
+  int32_t iint_pct;
   const char *region = PFC_FormalRegionName(pfc_formal_region_dbg);
+#if (PFC_FORMAL_USE_SYNC_IL_FEEDBACK != 0)
+  const char *feedback_source = "S";
+#else
+  const char *feedback_source = "A";
+#endif
 
   if (pfc_state == PFC_STATE_PFC_RUN)
   {
-    (void)snprintf(line, line_size, "PFC RUN %s", region);
+    (void)snprintf(line, line_size, "PFC RUN %s FB:%s", region, feedback_source);
   }
   else
   {
-    (void)snprintf(line, line_size, "PFC SS %s", region);
+    (void)snprintf(line, line_size, "PFC SS %s FB:%s", region, feedback_source);
   }
   PFC_OLED_WriteLine(0U, line);
 
@@ -4604,14 +4789,24 @@ static void PFC_UpdateDisplayPageFormalPfc(char *line,
   (void)snprintf(line, line_size, "VR:%s PK:%s", value, value2);
   PFC_OLED_WriteLine(2U, line);
 
-  PFC_FormatFixed(value, value_size, pfc_vac_fast_v, 1U);
-  PFC_FormatFixed(value2, sizeof(value2), pfc_vin_shape, 2U);
-  (void)snprintf(line, line_size, "VA:%s VS:%s", value, value2);
-  PFC_OLED_WriteLine(3U, line);
-
   PFC_FormatFixed(value, value_size, il_a, 2U);
   PFC_FormatFixed(value2, sizeof(value2), il_sync_a, 2U);
-  (void)snprintf(line, line_size, "IL:%s IS:%s", value, value2);
+  (void)snprintf(line, line_size, "ILa:%s IS:%s", value, value2);
+  PFC_OLED_WriteLine(3U, line);
+
+  duty_pct = (uint32_t)((pfc_duty_cmd * 100.0f) + 0.5f);
+  duty_max_pct = (uint32_t)((((pfc_state == PFC_STATE_PFC_SOFTSTART)
+                                  ? PFC_DUTY_MAX_SOFTSTART
+                                  : PFC_DUTY_MAX_RUN) *
+                             100.0f) +
+                            0.5f);
+  ff_pct = (uint32_t)((pfc_duty_ff * 100.0f) + 0.5f);
+  (void)snprintf(line,
+                 line_size,
+                 "D%02lu DMAX%02lu F%02lu",
+                 (unsigned long)duty_pct,
+                 (unsigned long)duty_max_pct,
+                 (unsigned long)ff_pct);
   PFC_OLED_WriteLine(4U, line);
 
   PFC_FormatFixed(value, value_size, pfc_iref_dbg, 2U);
@@ -4624,13 +4819,13 @@ static void PFC_UpdateDisplayPageFormalPfc(char *line,
   (void)snprintf(line, line_size, "IA:%s LM:%s", value, value2);
   PFC_OLED_WriteLine(6U, line);
 
-  duty_pct = (uint32_t)((pfc_duty_cmd * 100.0f) + 0.5f);
-  ff_pct = (uint32_t)((pfc_duty_ff * 100.0f) + 0.5f);
+  iint_pct = (pfc_iloop_integrator >= 0.0f)
+                 ? (int32_t)((pfc_iloop_integrator * 100.0f) + 0.5f)
+                 : (int32_t)((pfc_iloop_integrator * 100.0f) - 0.5f);
   (void)snprintf(line,
                  line_size,
-                 "D:%02lu FF:%02lu E:%04lX",
-                 (unsigned long)duty_pct,
-                 (unsigned long)ff_pct,
+                 "IINT:%+03ld E:%04lX",
+                 (long)iint_pct,
                  (unsigned long)PFC_PWM_GetErrorCode());
   PFC_OLED_WriteLine(7U, line);
 }
@@ -4915,7 +5110,11 @@ static void PFC_UpdateDisplay(void)
   }
   else if (page == 0U)
   {
-    if (pfc_state == PFC_STATE_OPENLOOP_2PCT_TEST)
+    if (pfc_state == PFC_STATE_AC_OPEN_DUTY_RAMP_TEST)
+    {
+      PFC_UpdateDisplayPageAcOpenDutyRamp(line, sizeof(line), value, sizeof(value));
+    }
+    else if (pfc_state == PFC_STATE_OPENLOOP_2PCT_TEST)
     {
       PFC_UpdateDisplayPageOpenLoop2Pct(line, sizeof(line), value, sizeof(value));
     }
@@ -4969,6 +5168,7 @@ void PFC_App_Task(void)
   PFC_BoostVoltageLoopTask();
   PFC_AcRectVoltageLoopTask();
   PFC_OpenLoop2PctTask();
+  PFC_AcOpenDutyRampTask();
   PFC_PfcTask();
   PFC_CheckProtection();
   PFC_UpdateDisplay();
