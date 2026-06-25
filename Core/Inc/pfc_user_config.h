@@ -291,11 +291,20 @@
 #define PFC_HEADROOM_MARGIN_SOFTSTART_V    0.5f
 #define PFC_HEADROOM_MARGIN_RUN_V          1.5f
 
+#define PFC_ILOOP_INT_MIN_FORMAL           -0.10f
+#define PFC_ILOOP_INT_MAX_SOFTSTART        0.35f
+#define PFC_ILOOP_INT_MAX_RUN              0.45f
+
 #define PFC_DFF_ENABLE                     1
+#define PFC_DFF_SHAPE_ENABLE_TH            0.45f
+#define PFC_DFF_BLEND_SHAPE_FULL           0.75f
+#define PFC_DFF_IREF_ENABLE_TH_A           0.08f
+#define PFC_DFF_MAX_SOFTSTART_SAFE         0.20f
+#define PFC_DFF_MAX_RUN_SAFE               0.30f
 #define PFC_DFF_MAX_SOFTSTART              0.45f
 #define PFC_DFF_MAX_RUN                    0.70f
-#define PFC_DUTY_MAX_SOFTSTART             0.65f
-#define PFC_DUTY_MAX_RUN                   0.75f
+#define PFC_DUTY_MAX_SOFTSTART             0.45f
+#define PFC_DUTY_MAX_RUN                   0.55f
 #define PFC_PWM_ABSOLUTE_DUTY_MAX          0.80f
 
 /* Formal PFC protection thresholds. */
@@ -303,8 +312,8 @@
 #define PFC_VBUS_PWM_OFF_V                 56.0f
 #define PFC_VBUS_HARD_FAULT_V              60.0f
 #define PFC_IL_SOFT_LIMIT_A                2.0f
-#define PFC_IL_CTRL_FAULT_A                3.5f
-#define PFC_IL_CTRL_FAULT_COUNT            5U
+#define PFC_IL_CTRL_FAULT_A                4.0f
+#define PFC_IL_CTRL_FAULT_COUNT            8U
 #define PFC_IL_ABS_HARD_FAULT_A            5.0f
 #define PFC_ADC_VREF_VALID_MIN_V           2.5f
 #define PFC_ADC_VREF_VALID_MAX_V           3.6f

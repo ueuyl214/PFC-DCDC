@@ -11,6 +11,7 @@
 #define PFC_APP_ERR_BOOST_TEST_VBUS 0x0801U
 #define PFC_APP_ERR_AC_RECT_TEST_VBUS 0x0901U
 #define PFC_APP_ERR_PFC_TEST_VBUS 0x0A01U
+#define PFC_FORMAL_DIAG_HOLD_MS 250U
 
 typedef enum
 {
@@ -30,6 +31,16 @@ typedef enum
   PFC_SS_PHASE_PASSIVE = 0,
   PFC_SS_PHASE_RAMP = 1
 } PFC_SoftStartPhase_t;
+
+typedef enum
+{
+  PFC_FORMAL_REGION_PASSIVE = 0,
+  PFC_FORMAL_REGION_CONTROLLED,
+  PFC_FORMAL_REGION_ZERO,
+  PFC_FORMAL_REGION_HEADROOM,
+  PFC_FORMAL_REGION_OVP,
+  PFC_FORMAL_REGION_I_SOFT
+} PFC_FormalRegion_t;
 
 static PFC_State_t pfc_state = PFC_STATE_IDLE;
 static PFC_Fault_t pfc_fault = PFC_FAULT_NONE;
@@ -115,6 +126,8 @@ static float pfc_iamp_limit_a = 0.0f;
 static uint8_t pfc_formal_il_fault_cnt = 0U;
 static float pfc_formal_peak_il_a = 0.0f;
 static uint8_t pfc_formal_reg_controlled_dbg = 0U;
+static volatile PFC_FormalRegion_t pfc_formal_region_dbg = PFC_FORMAL_REGION_PASSIVE;
+static volatile uint32_t pfc_formal_region_hold_until_ms = 0U;
 static volatile PFC_AcIPhase_t pfc_ac_i_phase = PFC_AC_I_PHASE_PASSIVE_PRECHARGE;
 static float pfc_ac_i_shape_duty_limit = PFC_AC_I_SHAPE_DUTY_MAX_INIT;
 static float pfc_ac_i_preboost_vref = PFC_AC_I_PREBOOST_VREF_INIT_V;
@@ -171,6 +184,26 @@ static float PFC_ClampFloat(float value, float min_value, float max_value)
     return max_value;
   }
   return value;
+}
+
+static const char *PFC_FormalRegionName(PFC_FormalRegion_t region)
+{
+  switch (region)
+  {
+    case PFC_FORMAL_REGION_CONTROLLED:
+      return "CTL";
+    case PFC_FORMAL_REGION_ZERO:
+      return "ZER";
+    case PFC_FORMAL_REGION_HEADROOM:
+      return "HEAD";
+    case PFC_FORMAL_REGION_OVP:
+      return "OVP";
+    case PFC_FORMAL_REGION_I_SOFT:
+      return "ISFT";
+    case PFC_FORMAL_REGION_PASSIVE:
+    default:
+      return "PAS";
+  }
 }
 
 static void PFC_FormatFixed(char *buffer, size_t buffer_size, float value, uint8_t decimals)
@@ -499,6 +532,8 @@ static void PFC_PfcControl_Reset(void)
   pfc_formal_il_fault_cnt = 0U;
   pfc_formal_peak_il_a = 0.0f;
   pfc_formal_reg_controlled_dbg = 0U;
+  pfc_formal_region_dbg = PFC_FORMAL_REGION_PASSIVE;
+  pfc_formal_region_hold_until_ms = 0U;
 #endif
 #if (PFC_TEST_PROFILE_18VAC_SIMPLE_PFC != 0)
 #if (PFC_SIMPLE_PREBOOST_ENABLE != 0)
@@ -1100,6 +1135,8 @@ static void PFC_FormalPfcResetControl(void)
   pfc_current_loop_update_count = 0U;
   pfc_formal_il_fault_cnt = 0U;
   pfc_formal_reg_controlled_dbg = 0U;
+  pfc_formal_region_dbg = PFC_FORMAL_REGION_PASSIVE;
+  pfc_formal_region_hold_until_ms = 0U;
   pfc_vloop_last_ms = HAL_GetTick();
   PFC_IsrControlReset();
 }
@@ -2431,11 +2468,17 @@ static void PFC_CurrentLoop_Core_Isr(float i_ref, float il_feedback, float duty_
   float duty_delta;
   float duty_limited;
   float duty_aw_max;
+  float iloop_int_min = -0.20f;
+  float iloop_int_max = 0.20f;
 
   if ((pfc_state == PFC_STATE_PFC_SOFTSTART) ||
       ((PFC_PROFILE_SOFTSTART_RUN_ENABLE != 0) && (pfc_state == PFC_STATE_PFC_RUN)))
   {
     pfc_iref_a = PFC_ClampFloat(i_ref, 0.0f, PFC_IREF_ABS_MAX_A);
+    iloop_int_min = PFC_ILOOP_INT_MIN_FORMAL;
+    iloop_int_max = (pfc_state == PFC_STATE_PFC_SOFTSTART)
+                        ? PFC_ILOOP_INT_MAX_SOFTSTART
+                        : PFC_ILOOP_INT_MAX_RUN;
   }
   else if (pfc_state == PFC_STATE_DC_CURRENT_TEST)
   {
@@ -2515,20 +2558,28 @@ static void PFC_CurrentLoop_Core_Isr(float i_ref, float il_feedback, float duty_
   if ((pfc_state == PFC_STATE_PFC_SOFTSTART) ||
       ((PFC_PROFILE_SOFTSTART_RUN_ENABLE != 0) && (pfc_state == PFC_STATE_PFC_RUN)))
   {
-    const float dff_max = (pfc_state == PFC_STATE_PFC_SOFTSTART)
-                              ? PFC_DFF_MAX_SOFTSTART
-                              : PFC_DFF_MAX_RUN;
-
 #if (PFC_DFF_ENABLE != 0)
-    if (pfc_vbus_fast_v > 1.0f)
-    {
-      pfc_duty_ff = 1.0f - (pfc_vac_fast_v / pfc_vbus_fast_v);
-    }
-    else
+    const float dff_max_safe = (pfc_state == PFC_STATE_PFC_SOFTSTART)
+                                   ? PFC_DFF_MAX_SOFTSTART_SAFE
+                                   : PFC_DFF_MAX_RUN_SAFE;
+
+    if ((pfc_vin_shape < PFC_DFF_SHAPE_ENABLE_TH) ||
+        (pfc_iref_a < PFC_DFF_IREF_ENABLE_TH_A) ||
+        (pfc_vbus_fast_v <= 1.0f))
     {
       pfc_duty_ff = 0.0f;
     }
-    pfc_duty_ff = PFC_ClampFloat(pfc_duty_ff, 0.0f, dff_max);
+    else
+    {
+      float dff_raw = 1.0f - (pfc_vac_fast_v / pfc_vbus_fast_v);
+      float blend;
+
+      dff_raw = PFC_ClampFloat(dff_raw, 0.0f, dff_max_safe);
+      blend = (pfc_vin_shape - PFC_DFF_SHAPE_ENABLE_TH) /
+              (PFC_DFF_BLEND_SHAPE_FULL - PFC_DFF_SHAPE_ENABLE_TH);
+      blend = PFC_ClampFloat(blend, 0.0f, 1.0f);
+      pfc_duty_ff = dff_raw * blend;
+    }
 #else
     pfc_duty_ff = 0.0f;
 #endif
@@ -2622,7 +2673,9 @@ static void PFC_CurrentLoop_Core_Isr(float i_ref, float il_feedback, float duty_
   }
 
   integrator_candidate = pfc_iloop_integrator + (iloop_ki * i_err);
-  integrator_candidate = PFC_ClampFloat(integrator_candidate, -0.20f, 0.20f);
+  integrator_candidate = PFC_ClampFloat(integrator_candidate,
+                                        iloop_int_min,
+                                        iloop_int_max);
 
   pfc_duty_pi = (iloop_kp * i_err) + integrator_candidate;
   duty_unsat = pfc_duty_ff + pfc_duty_pi;
@@ -2810,6 +2863,8 @@ void PFC_App_OnInjectedCurrentIsr(void)
 
     if (il_abs > PFC_IL_ABS_HARD_FAULT_A)
     {
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_I_SOFT;
+      pfc_formal_region_hold_until_ms = HAL_GetTick() + PFC_FORMAL_DIAG_HOLD_MS;
       fault_peak_isr_cnt = 1U;
       PFC_FormalPfcBlankOutput(1U);
       pfc_isr_fault_request = (uint8_t)PFC_FAULT_OCP;
@@ -2884,6 +2939,8 @@ void PFC_App_OnInjectedCurrentIsr(void)
         (pfc_ss_phase == PFC_SS_PHASE_PASSIVE))
     {
       pfc_formal_reg_controlled_dbg = 0U;
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_PASSIVE;
+      pfc_formal_region_hold_until_ms = 0U;
       pfc_formal_il_fault_cnt = 0U;
       PFC_FormalPfcBlankOutput(1U);
       return;
@@ -2893,17 +2950,42 @@ void PFC_App_OnInjectedCurrentIsr(void)
                           ? PFC_HEADROOM_MARGIN_SOFTSTART_V
                           : PFC_HEADROOM_MARGIN_RUN_V;
     if ((pfc_vac_fast_v < PFC_VIN_BLANK_V) ||
-        (pfc_vin_shape < PFC_SHAPE_MIN) ||
-        (pfc_vbus_fast_v <= (pfc_vac_fast_v + headroom_margin)) ||
-        (pfc_vbus_fast_v > PFC_VBUS_PWM_OFF_V))
+        (pfc_vin_shape < PFC_SHAPE_MIN))
     {
       pfc_formal_reg_controlled_dbg = 0U;
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_ZERO;
+      pfc_formal_region_hold_until_ms = 0U;
+      pfc_formal_il_fault_cnt = 0U;
+      PFC_FormalPfcBlankOutput(0U);
+      return;
+    }
+
+    if (pfc_vbus_fast_v <= (pfc_vac_fast_v + headroom_margin))
+    {
+      pfc_formal_reg_controlled_dbg = 0U;
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_HEADROOM;
+      pfc_formal_region_hold_until_ms = 0U;
+      pfc_formal_il_fault_cnt = 0U;
+      PFC_FormalPfcBlankOutput(0U);
+      return;
+    }
+
+    if (pfc_vbus_fast_v > PFC_VBUS_PWM_OFF_V)
+    {
+      pfc_formal_reg_controlled_dbg = 0U;
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_OVP;
+      pfc_formal_region_hold_until_ms = 0U;
       pfc_formal_il_fault_cnt = 0U;
       PFC_FormalPfcBlankOutput(0U);
       return;
     }
 
     pfc_formal_reg_controlled_dbg = 1U;
+    if ((pfc_formal_region_dbg != PFC_FORMAL_REGION_I_SOFT) ||
+        (HAL_GetTick() >= pfc_formal_region_hold_until_ms))
+    {
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_CONTROLLED;
+    }
     pfc_isr_headroom_ok_dbg = 1U;
 
     if (il_abs > PFC_IL_CTRL_FAULT_A)
@@ -2930,6 +3012,8 @@ void PFC_App_OnInjectedCurrentIsr(void)
     {
       float duty_reduced = pfc_duty_out_dbg - 0.03f;
 
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_I_SOFT;
+      pfc_formal_region_hold_until_ms = HAL_GetTick() + PFC_FORMAL_DIAG_HOLD_MS;
       pfc_iamp_cmd *= 0.85f;
       pfc_vloop_integrator *= 0.90f;
       duty_reduced = PFC_ClampFloat(duty_reduced, 0.0f, PFC_DUTY_MAX_RUN);
@@ -4007,6 +4091,8 @@ static void PFC_CheckProtection(void)
 
     if (pfc_vbus_fast_v > PFC_VBUS_PWM_OFF_V)
     {
+      pfc_formal_region_dbg = PFC_FORMAL_REGION_OVP;
+      pfc_formal_region_hold_until_ms = 0U;
       pfc_iamp_cmd *= 0.50f;
       pfc_vloop_integrator *= 0.50f;
       PFC_FormalPfcBlankOutput(0U);
@@ -4496,17 +4582,15 @@ static void PFC_UpdateDisplayPageFormalPfc(char *line,
   char value2[12];
   uint32_t duty_pct;
   uint32_t ff_pct;
+  const char *region = PFC_FormalRegionName(pfc_formal_region_dbg);
 
   if (pfc_state == PFC_STATE_PFC_RUN)
   {
-    (void)snprintf(line, line_size, "PFC RUN");
+    (void)snprintf(line, line_size, "PFC RUN %s", region);
   }
   else
   {
-    (void)snprintf(line,
-                   line_size,
-                   "PFC SS %s",
-                   (pfc_formal_reg_controlled_dbg != 0U) ? "CTL" : "PAS");
+    (void)snprintf(line, line_size, "PFC SS %s", region);
   }
   PFC_OLED_WriteLine(0U, line);
 
